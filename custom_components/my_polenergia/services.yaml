@@ -1,0 +1,14 @@
+reload_statistics:
+  name: Reload historical statistics
+  description: Re-import historical energy consumption (and cost) from Polenergia API into Home Assistant statistics database.
+  fields:
+    from_date:
+      name: Start date
+      description: Optional custom start date for historical data import (ISO format YYYY-MM-DD). If not provided, uses the agreement start date.
+      example: "2020-01-01"
+      selector:
+        text:
+
+clear_statistics:
+  name: Clear statistics
+  description: Remove all energy and cost statistics created by this integration from the Home Assistant recorder. Use before reload_statistics for a clean slate.

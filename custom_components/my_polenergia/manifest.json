@@ -1,0 +1,15 @@
+{
+  "domain": "my_polenergia",
+  "name": "My Polenergia",
+  "codeowners": ["@Nigatsu"],
+  "config_flow": true,
+  "dependencies": [],
+  "after_dependencies": ["recorder"],
+  "documentation": "https://github.com/Nigatsu/hass-my-polenergia",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Nigatsu/hass-my-polenergia/issues",
+  "homeassistant": "2024.10.0",
+  "requirements": [],
+  "version": "0.1.0"
+}

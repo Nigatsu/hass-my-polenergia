@@ -1,0 +1,128 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Moja Polenergia",
+        "description": "Wprowadź dane logowania do konta Polenergia",
+        "data": {
+          "username": "Adres e-mail",
+          "password": "Hasło"
+        }
+      },
+      "customer_number": {
+        "title": "Wybierz numer klienta",
+        "description": "Znaleziono wiele numerów klientów. Proszę wybrać jeden.",
+        "data": {
+          "customer_number": "Numer klienta"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ponowne uwierzytelnienie konta Polenergia",
+        "description": "Sesja wygasła. Wprowadź hasło, aby ponownie się zalogować dla konta: {username}",
+        "data": {
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nieprawidłowe dane logowania",
+      "cannot_connect": "Nie można połączyć się z API Polenergia",
+      "no_customer_numbers": "Nie znaleziono numerów klientów dla tego konta",
+      "no_access_token": "Logowanie udane, ale nie otrzymano tokenu dostępu",
+      "unknown": "Wystąpił nieoczekiwany błąd"
+    },
+    "abort": {
+      "already_configured": "To konto jest już skonfigurowane",
+      "no_customer_numbers": "Nie znaleziono numerów klientów",
+      "reauth_successful": "Ponowne uwierzytelnienie zakończone sukcesem"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje Polenergia",
+        "description": "Wybierz, co chcesz skonfigurować.",
+        "menu_options": {
+          "set_price": "Ustaw cenę energii",
+          "scan_interval": "Interwał aktualizacji",
+          "reload_history": "Przeładuj dane historyczne",
+          "clear_stats": "Wyczyść statystyki",
+          "change_credentials": "Zmień dane logowania"
+        }
+      },
+      "set_price": {
+        "title": "Ustaw cenę energii",
+        "description": "Cena za 1 kWh w PLN — używana do obliczania miesięcznych kosztów w Panelu Energii.",
+        "data": {
+          "import_price": "Cena poboru (PLN/kWh)"
+        }
+      },
+      "scan_interval": {
+        "title": "Interwał aktualizacji",
+        "description": "Jak często pobierać dane z Polenergii (w sekundach, minimum 900).",
+        "data": {
+          "scan_interval": "Interwał aktualizacji (sekundy)"
+        }
+      },
+      "reload_history": {
+        "title": "Przeładuj dane historyczne",
+        "description": "Ponownie pobierz wszystkie miesięczne odczyty i przelicz statystyki energii oraz kosztów. Zostaw pole daty puste, aby użyć daty rozpoczęcia umowy.",
+        "data": {
+          "from_date": "Data początkowa (YYYY-MM-DD, opcjonalna)"
+        }
+      },
+      "clear_stats": {
+        "title": "Wyczyść statystyki",
+        "description": "Trwale usuń wszystkie statystyki energii i kosztów utworzone przez tę integrację. Użyj przed Przeładowaniem dla czystego startu.",
+        "data": {
+          "confirm": "Tak, usuń wszystkie moje statystyki Polenergia"
+        }
+      },
+      "change_credentials": {
+        "title": "Zmień dane logowania",
+        "description": "Zaktualizuj hasło dla {username}.",
+        "data": {
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nieprawidłowe dane logowania",
+      "cannot_connect": "Nie można połączyć się z API Polenergia",
+      "invalid_date": "Nieprawidłowa data — użyj formatu ISO YYYY-MM-DD",
+      "unknown": "Wystąpił nieoczekiwany błąd"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_month_consumption": {
+        "name": "Zużycie za ostatni miesiąc"
+      },
+      "historical_statistics": {
+        "name": "Statystyki historyczne"
+      },
+      "cost_statistics": {
+        "name": "Statystyki kosztów"
+      },
+      "import_price": {
+        "name": "Cena poboru"
+      }
+    }
+  },
+  "services": {
+    "reload_statistics": {
+      "name": "Przeładuj dane historyczne",
+      "description": "Ponownie importuje historyczne dane zużycia i kosztów z API Polenergia do bazy statystyk Home Assistant.",
+      "fields": {
+        "from_date": {
+          "name": "Data początkowa",
+          "description": "Opcjonalna data początkowa (format ISO YYYY-MM-DD). Jeśli nie podano, używana jest najwcześniejsza data umowy."
+        }
+      }
+    },
+    "clear_statistics": {
+      "name": "Wyczyść statystyki",
+      "description": "Usuwa wszystkie statystyki energii i kosztów utworzone przez tę integrację."
+    }
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "My Polenergia",
+        "description": "Enter your Polenergia account credentials",
+        "data": {
+          "username": "Email Address",
+          "password": "Password"
+        }
+      },
+      "customer_number": {
+        "title": "Select Customer Number",
+        "description": "Multiple customer numbers found. Please select one.",
+        "data": {
+          "customer_number": "Customer Number"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Polenergia Account",
+        "description": "Your session has expired. Please enter your password to re-authenticate for account: {username}",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication credentials",
+      "cannot_connect": "Unable to connect to Polenergia API",
+      "no_customer_numbers": "No customer numbers found for this account",
+      "no_access_token": "Authentication succeeded but no access token was returned",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This account is already configured",
+      "no_customer_numbers": "No customer numbers found",
+      "reauth_successful": "Re-authentication successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polenergia Options",
+        "description": "Choose what to configure.",
+        "menu_options": {
+          "set_price": "Set Energy Price",
+          "scan_interval": "Update Interval",
+          "reload_history": "Reload Historical Statistics",
+          "clear_stats": "Clear Statistics",
+          "change_credentials": "Change Credentials"
+        }
+      },
+      "set_price": {
+        "title": "Set Energy Price",
+        "description": "Price per kWh in PLN, used to calculate monthly cost statistics for the Energy Dashboard.",
+        "data": {
+          "import_price": "Import price (PLN/kWh)"
+        }
+      },
+      "scan_interval": {
+        "title": "Update Interval",
+        "description": "How often to poll Polenergia for new data (in seconds, minimum 900).",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      },
+      "reload_history": {
+        "title": "Reload Historical Statistics",
+        "description": "Re-fetch all monthly readings and rebuild energy + cost statistics. Leave the start date empty to use the agreement start date.",
+        "data": {
+          "from_date": "Start date (YYYY-MM-DD, optional)"
+        }
+      },
+      "clear_stats": {
+        "title": "Clear Statistics",
+        "description": "Permanently remove all energy and cost statistics created by this integration. Use before Reload to start clean.",
+        "data": {
+          "confirm": "Yes, clear all my Polenergia statistics"
+        }
+      },
+      "change_credentials": {
+        "title": "Change Credentials",
+        "description": "Update the password for {username}.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication credentials",
+      "cannot_connect": "Unable to connect to Polenergia API",
+      "invalid_date": "Invalid date — use ISO format YYYY-MM-DD",
+      "unknown": "Unexpected error occurred"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_month_consumption": {
+        "name": "Last Month Consumption"
+      },
+      "historical_statistics": {
+        "name": "Historical Statistics"
+      },
+      "cost_statistics": {
+        "name": "Cost Statistics"
+      },
+      "import_price": {
+        "name": "Import Price"
+      }
+    }
+  },
+  "services": {
+    "reload_statistics": {
+      "name": "Reload historical statistics",
+      "description": "Re-import historical energy (and cost) statistics from the Polenergia API.",
+      "fields": {
+        "from_date": {
+          "name": "Start date",
+          "description": "Optional custom start date (ISO format YYYY-MM-DD). If not provided, uses the earliest agreement start date."
+        }
+      }
+    },
+    "clear_statistics": {
+      "name": "Clear statistics",
+      "description": "Remove all energy and cost statistics created by this integration."
+    }
+  }
+}
