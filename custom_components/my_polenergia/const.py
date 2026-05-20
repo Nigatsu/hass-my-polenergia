@@ -8,14 +8,12 @@ DOMAIN = "my_polenergia"
 # Configuration keys
 CONF_CUSTOMER_NUMBER = "customer_number"
 CONF_PASSWORD = "password"
-CONF_ACCESS_TOKEN = "access_token"
-CONF_TOKEN_EXPIRY = "token_expiry"
 CONF_ACCOUNT_NAME = "account_name"
 CONF_HISTORICAL_IMPORT_DONE = "historical_import_done"
 CONF_IMPORT_PRICE = "import_price"
 
 # Data update interval
-DEFAULT_SCAN_INTERVAL = timedelta(hours=1)
+DEFAULT_SCAN_INTERVAL = timedelta(hours=24)
 MIN_SCAN_INTERVAL = timedelta(minutes=15)
 
 # Pricing

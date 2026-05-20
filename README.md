@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="My Polenergia Logo" width="200"/>
+  <img src="logo.png" alt="My Polenergia Logo" width="100"/>
 </div>
 
 <h1 align="center">My Polenergia — Home Assistant Integration</h1>
@@ -19,6 +19,7 @@
 
 - 📡 **OAuth2 + PKCE authentication** — no scraping, secure token flow against the official portal API.
 - 📊 **Energy Dashboard ready** — cumulative monthly kWh statistics fed straight into the HA recorder.
+- 🗄️ **Full historical import** — pulls every monthly reading back to your agreement start date.
 - 💰 **Cost calculation** — configure a PLN/kWh price, get a cumulative cost statistics sensor for Energy Dashboard cost tracking.
 - 🏠 **Multi-meter support** — one HA device per measurement point (PPE), per customer account.
 - 🔁 **Auto re-authentication** — handles token expiry without user intervention.
@@ -49,6 +50,8 @@
 2. Enter your `moja.polenergia.pl` email and password.
 3. If your account has multiple customer numbers, pick one (you can add more entries later, one per customer number).
 4. Done — sensors and historical statistics appear within a minute.
+
+The integration polls Polenergia **once per day** by default (their data updates monthly anyway). You can change this under **Configure** → **Update Interval**.
 
 ---
 

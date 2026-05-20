@@ -12,12 +12,10 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    CONF_ACCESS_TOKEN,
     CONF_ACCOUNT_NAME,
     CONF_CUSTOMER_NUMBER,
     CONF_HISTORICAL_IMPORT_DONE,
     CONF_IMPORT_PRICE,
-    CONF_TOKEN_EXPIRY,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -93,8 +91,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PolEnergia from a config entry."""
     username = entry.data[CONF_USERNAME]
     password = entry.data.get(CONF_PASSWORD)
-    access_token = entry.data.get(CONF_ACCESS_TOKEN)
-    token_expiry_str = entry.data.get(CONF_TOKEN_EXPIRY)
     customer_number = entry.data[CONF_CUSTOMER_NUMBER]
 
     if not password:
@@ -107,31 +103,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = PolEnergiaClient()
 
     try:
-        token_valid = False
-        if access_token and token_expiry_str:
-            try:
-                token_expiry = datetime.fromisoformat(token_expiry_str)
-                if datetime.now() < token_expiry - timedelta(minutes=5):
-                    token_valid = True
-                    _LOGGER.debug("Using stored access token (expires: %s)", token_expiry)
-            except (ValueError, TypeError) as err:
-                _LOGGER.warning("Could not parse token expiry: %s", err)
-
-        if token_valid:
-            client.connector._access_token = access_token
-            client.connector._token_expiry = datetime.fromisoformat(token_expiry_str)
-        else:
-            _LOGGER.info("Token expired — re-authenticating for %s", username)
-            authenticated = await client.authenticate(username, password)
-            if not authenticated:
-                await client.close()
-                raise ConfigEntryAuthFailed("Authentication failed. Please check your credentials.")
-
-            new_data = entry.data.copy()
-            new_data[CONF_ACCESS_TOKEN] = client.connector._access_token
-            new_data[CONF_TOKEN_EXPIRY] = client.connector._token_expiry.isoformat() if client.connector._token_expiry else None
-            hass.config_entries.async_update_entry(entry, data=new_data)
-            _LOGGER.info("Re-authenticated and stored new token for %s", username)
+        # Token kept in client memory only — re-auth on each HA restart.
+        # Persisting via async_update_entry triggers the entry update listener
+        authenticated = await client.authenticate(username, password)
+        if not authenticated:
+            await client.close()
+            raise ConfigEntryAuthFailed("Authentication failed. Please check your credentials.")
+        _LOGGER.info("Authenticated %s", username)
 
     except PolEnergiaAuthorizationError as err:
         await client.close()

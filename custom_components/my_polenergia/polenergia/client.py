@@ -1,7 +1,7 @@
 """PolEnergia API client - high-level interface."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .connector import PolEnergiaConnector
@@ -9,6 +9,12 @@ from .data import EnergyReading, MeasurementPoint, PolEnergiaData
 from .errors import PolEnergiaAPIError, PolEnergiaNoDataError
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _next_day_utc() -> datetime:
+    """Tomorrow at 00:00 UTC — exclusive upper bound for half-open [from, to) queries."""
+    now = datetime.now(tz=timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
 
 
 class PolEnergiaClient:
@@ -100,13 +106,13 @@ class PolEnergiaClient:
     ) -> list[EnergyReading]:
         """Get monthly energy readings."""
         if to_date is None:
-            to_date = datetime.now()
+            to_date = _next_day_utc()
         if from_date is None:
             from_date = to_date - timedelta(days=365)
 
         params = {
             "from": from_date.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-            "to": to_date.strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+            "to": to_date.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         }
 
         response = await self._connector.get("MeasurementPoints/readings", params=params)
@@ -125,7 +131,7 @@ class PolEnergiaClient:
         measurement_points = await self.get_measurement_points(customer_number)
 
         # Fetch last 13 months to cover current + previous year
-        to_date = datetime.now()
+        to_date = _next_day_utc()
         from_date = datetime(to_date.year - 1, to_date.month, 1)
 
         readings_list = await self.get_readings(from_date=from_date, to_date=to_date)

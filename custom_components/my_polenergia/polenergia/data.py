@@ -3,6 +3,10 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Polenergia is Polish; bare timestamps without offset = Warsaw wall-clock.
+_POLENERGIA_TZ = ZoneInfo("Europe/Warsaw")
 
 
 @dataclass
@@ -68,6 +72,9 @@ class EnergyReading:
         else:
             timestamp = datetime.now()
 
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=_POLENERGIA_TZ)
+
         mp_id = data.get("measurementPointId")
         return cls(
             timestamp=timestamp,
@@ -77,9 +84,9 @@ class EnergyReading:
         )
 
     @property
-    def period_start(self) -> datetime:
-        """Return the start of the billing period (first day of the month, UTC-aware)."""
-        return datetime(self.timestamp.year, self.timestamp.month, 1, 0, 0, 0, tzinfo=timezone.utc)
+    def period_anchor(self) -> datetime:
+        """Polenergia anchors monthly readings at last day of the month (timezone-aware)."""
+        return self.timestamp if self.timestamp.tzinfo else self.timestamp.replace(tzinfo=_POLENERGIA_TZ)
 
 
 @dataclass

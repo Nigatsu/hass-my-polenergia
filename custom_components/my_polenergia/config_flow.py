@@ -11,11 +11,9 @@ from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    CONF_ACCESS_TOKEN,
     CONF_ACCOUNT_NAME,
     CONF_CUSTOMER_NUMBER,
     CONF_IMPORT_PRICE,
-    CONF_TOKEN_EXPIRY,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -41,8 +39,6 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self):
         self._username: str | None = None
         self._password: str | None = None
-        self._access_token: str | None = None
-        self._token_expiry: str | None = None
         self._account_name: str | None = None
         self._customer_numbers: list[str] | None = None
         self._reauth_entry: config_entries.ConfigEntry | None = None
@@ -65,9 +61,6 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     elif not client.connector._access_token:
                         errors["base"] = "no_access_token"
                     else:
-                        self._access_token = client.connector._access_token
-                        self._token_expiry = client.connector._token_expiry.isoformat() if client.connector._token_expiry else None
-
                         self._customer_numbers = await client.get_customer_numbers()
 
                         if not self._customer_numbers:
@@ -125,8 +118,6 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data={
                 CONF_USERNAME: self._username,
                 CONF_PASSWORD: self._password,
-                CONF_ACCESS_TOKEN: self._access_token,
-                CONF_TOKEN_EXPIRY: self._token_expiry,
                 CONF_CUSTOMER_NUMBER: customer_number,
                 CONF_ACCOUNT_NAME: self._account_name,
             },
@@ -159,8 +150,6 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         new_data = {
                             **self._reauth_entry.data,
                             CONF_PASSWORD: password,
-                            CONF_ACCESS_TOKEN: client.connector._access_token,
-                            CONF_TOKEN_EXPIRY: client.connector._token_expiry.isoformat() if client.connector._token_expiry else None,
                             CONF_ACCOUNT_NAME: account_name or self._reauth_entry.data.get(CONF_ACCOUNT_NAME),
                         }
                         self.hass.config_entries.async_update_entry(
@@ -321,8 +310,6 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
                         new_data = {
                             **self.config_entry.data,
                             CONF_PASSWORD: password,
-                            CONF_ACCESS_TOKEN: client.connector._access_token,
-                            CONF_TOKEN_EXPIRY: client.connector._token_expiry.isoformat() if client.connector._token_expiry else None,
                             CONF_ACCOUNT_NAME: account_name or self.config_entry.data.get(CONF_ACCOUNT_NAME),
                         }
                         self.hass.config_entries.async_update_entry(

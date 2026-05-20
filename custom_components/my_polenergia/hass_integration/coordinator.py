@@ -9,7 +9,6 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from ..const import CONF_ACCESS_TOKEN, CONF_TOKEN_EXPIRY
 from ..polenergia.client import PolEnergiaClient
 from ..polenergia.errors import (
     PolEnergiaAPIError,
@@ -63,10 +62,6 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
                 if not authenticated:
                     raise UpdateFailed("Re-authentication failed") from err
 
-                new_data = self.config_entry.data.copy()
-                new_data[CONF_ACCESS_TOKEN] = self.client.connector._access_token
-                new_data[CONF_TOKEN_EXPIRY] = self.client.connector._token_expiry.isoformat() if self.client.connector._token_expiry else None
-                self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
                 _LOGGER.info("Re-authenticated successfully")
 
                 data = await self.client.get_all_data(customer_number=self.customer_number)
@@ -103,14 +98,14 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             readings = await self.client.get_readings(
                 from_date=from_date,
-                to_date=datetime.now(),
+                to_date=None,  # let client default to tomorrow 00:00 UTC
             )
 
             if not readings:
                 _LOGGER.warning("No historical readings found for %s", measurement_point_id)
                 return {"energy": [], "cost": []}
 
-            readings.sort(key=lambda r: r.period_start)
+            readings.sort(key=lambda r: r.period_anchor)
 
             energy_stats: list[StatisticData] = []
             cost_stats: list[StatisticData] = []
@@ -121,18 +116,18 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
                 cumulative_energy += reading.value
                 cumulative_cost += reading.value * price
                 energy_stats.append(StatisticData(
-                    start=reading.period_start,
+                    start=reading.period_anchor,
                     state=reading.value,
                     sum=cumulative_energy,
                 ))
                 cost_stats.append(StatisticData(
-                    start=reading.period_start,
+                    start=reading.period_anchor,
                     state=reading.value * price,
                     sum=cumulative_cost,
                 ))
 
-            # Anchor current (incomplete) month at zero so the graph doesn't
-            # extrapolate forward from the last real data point.
+            # Anchor at start of current month with zero so graph doesn't
+            # extrapolate forward from last real data point (end of prev month).
             now = datetime.now(tz=timezone.utc)
             current_month_start = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
             if energy_stats and energy_stats[-1]["start"] < current_month_start:
