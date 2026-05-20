@@ -4,21 +4,21 @@ import logging
 
 from homeassistant.components.recorder.models import StatisticMeanType, StatisticMetaData
 from homeassistant.components.recorder.statistics import async_import_statistics
-from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CURRENCY_PLN, DOMAIN
+from .const import CONF_IMPORT_PRICE, CURRENCY_PLN, DEFAULT_IMPORT_PRICE, DOMAIN
 from .hass_integration.coordinator import PolEnergiaDataUpdateCoordinator
 from .polenergia.data import MeasurementPoint
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class _PolEnergiaStatisticsBase(CoordinatorEntity):
+class _PolEnergiaStatisticsBase(CoordinatorEntity, SensorEntity):
     """Common machinery for statistics-only sensors.
 
     Subclasses set:
@@ -36,6 +36,7 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity):
     _device_class: SensorDeviceClass | None = None
     _unit_class: str | None = None
     _unique_suffix: str = ""
+    _attr_state_class = SensorStateClass.TOTAL
 
     def __init__(
         self,
@@ -53,8 +54,6 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity):
         self._attr_unique_id = f"{measurement_point.id}_{self._unique_suffix}"
         self._attr_native_unit_of_measurement = self._unit
         self._attr_device_class = self._device_class
-        self._attr_native_value = None
-        self._attr_available = False
 
         _LOGGER.info(
             "Initialized %s sensor for measurement point %s (PPE: %s)",
@@ -82,33 +81,59 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity):
             return mp_entry if self.STAT_KEY == "energy" else []
         return mp_entry.get(self.STAT_KEY, [])
 
+    def _latest_state_from_readings(self) -> float | None:
+        """Fallback state when in-memory stats dict is empty (e.g. after HA restart)."""
+        if not self.coordinator.data:
+            return None
+        data = self.coordinator.data.get("data")
+        if not data:
+            return None
+        latest = data.get_latest_reading(self.measurement_point.id)
+        if latest is None:
+            return None
+        if self.STAT_KEY == "energy":
+            return float(latest.value)
+        # cost: latest kWh × configured PLN/kWh
+        price = float(self._entry.options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE))
+        return float(latest.value) * price
+
+    @property
+    def native_value(self) -> float | None:
+        """Live state: latest cumulative sum if just imported, else latest reading."""
+        mp_statistics = self._get_stats()
+        if mp_statistics:
+            return mp_statistics[-1]["sum"]
+        return self._latest_state_from_readings()
+
+    @property
+    def available(self) -> bool:
+        return self.native_value is not None
+
     @callback
     def _handle_coordinator_update(self) -> None:
         mp_statistics = self._get_stats()
-        if not mp_statistics:
-            _LOGGER.debug("No %s statistics available for %s", self.STAT_KEY, self.measurement_point.id)
-            super()._handle_coordinator_update()
-            return
 
-        _LOGGER.info(
-            "Importing %d %s statistics for %s",
-            len(mp_statistics),
-            self.STAT_KEY,
-            self.entity_id,
-        )
+        if mp_statistics:
+            _LOGGER.info(
+                "Importing %d %s statistics for %s",
+                len(mp_statistics),
+                self.STAT_KEY,
+                self.entity_id,
+            )
 
-        metadata = StatisticMetaData(
-            source="recorder",
-            statistic_id=self.entity_id,
-            name=self._attr_name,
-            unit_of_measurement=self._unit,
-            unit_class=self._unit_class,
-            has_mean=False,
-            has_sum=True,
-            mean_type=StatisticMeanType.NONE,
-        )
+            metadata = StatisticMetaData(
+                source="recorder",
+                statistic_id=self.entity_id,
+                name=self._attr_name,
+                unit_of_measurement=self._unit,
+                unit_class=self._unit_class,
+                has_mean=False,
+                has_sum=True,
+                mean_type=StatisticMeanType.NONE,
+            )
 
-        async_import_statistics(self.hass, metadata, mp_statistics)
+            async_import_statistics(self.hass, metadata, mp_statistics)
+
         super()._handle_coordinator_update()
 
     @property

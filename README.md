@@ -76,11 +76,11 @@ Per measurement point (PPE):
 | Sensor | Purpose | Unit |
 |--------|---------|------|
 | `Last Month Consumption` | Latest monthly reading (informational). | kWh |
-| `Historical Statistics` | Cumulative kWh — feed this into Energy Dashboard. Always shows "unavailable" as a state. | kWh |
-| `Cost Statistics` | Cumulative PLN — Energy Dashboard cost-tracking entity. Always shows "unavailable" as a state. | PLN |
+| `Historical Statistics` | Cumulative kWh — feed this into Energy Dashboard. State = running total. | kWh |
+| `Cost Statistics` | Cumulative PLN — Energy Dashboard cost-tracking entity. State = running total. | PLN |
 | `Import Price` | Diagnostic: currently configured PLN/kWh. | PLN/kWh |
 
-The "Historical Statistics" and "Cost Statistics" sensors are **statistics-only** — they appear `unavailable` in the entity list, but their data lives in the recorder and shows up in the Energy Dashboard.
+The `Historical Statistics` and `Cost Statistics` sensors carry `state_class: total`; their full data lives in the recorder's long-term statistics, while the entity state reflects the latest cumulative value.
 
 Each sensor exposes attributes: `ppe`, `customer_number`, `address`, `tariff` (when available), `account_name`, `last_update`. The `Last Month Consumption` sensor adds a `period` (`YYYY-MM`) attribute.
 
@@ -102,9 +102,6 @@ Monthly bars will appear once the next data update cycle runs.
 
 > [!TIP]
 > Don't see your meter under "Add consumption"? Make sure you picked the `_historical_statistics` entity, not `_last_month_consumption` — the latter intentionally has no `state_class` so HA won't offer it as a dashboard candidate.
-
-> [!WARNING]
-> Statistics-only sensors show as `unavailable` in the entity list. This is **normal** — their data lives in the recorder, not in live state.
 
 ---
 
