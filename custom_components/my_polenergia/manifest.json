@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/Nigatsu/hass-my-polenergia/issues",
   "homeassistant": "2024.10.0",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "1.1.0"
 }
