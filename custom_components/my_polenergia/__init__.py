@@ -187,23 +187,20 @@ def _register_services(hass: HomeAssistant) -> None:
                 if not entry_data:
                     continue
                 coord = entry_data["coordinator"]
-                if not (coord.data and coord.data.get("data")):
-                    continue
-                data = coord.data["data"]
-                for mp in data.measurement_points:
-                    # entity_ids derived from device name slugification; can't
-                    # reconstruct reliably here — collect from entity registry.
-                    pass
-                # Reset coordinator's cached statistics so importers re-run.
-                coord.data["statistics"] = {}
-                coord.async_set_updated_data(coord.data)
+                if coord.data and coord.data.get("data"):
+                    data = coord.data["data"]
+                    for mp in data.measurement_points:
+                        statistic_ids.append(f"{DOMAIN}:{mp.id}_energy")
+                        statistic_ids.append(f"{DOMAIN}:{mp.id}_cost")
+                    # Reset cached statistics so importers re-run.
+                    coord.data["statistics"] = {}
+                    coord.async_set_updated_data(coord.data)
 
                 new_options = cfg_entry.options.copy()
                 new_options[CONF_HISTORICAL_IMPORT_DONE] = False
                 hass.config_entries.async_update_entry(cfg_entry, options=new_options)
 
-            # Resolve statistic_ids via entity registry: all my_polenergia
-            # entities with unique_id ending in "_statistics" or "_cost_statistics".
+            # Also wipe legacy entity_id-keyed stats from older versions.
             from homeassistant.helpers import entity_registry as er
             registry = er.async_get(hass)
             for entry_obj in registry.entities.values():
@@ -215,9 +212,9 @@ def _register_services(hass: HomeAssistant) -> None:
             if statistic_ids:
                 from homeassistant.components.recorder import get_instance
                 get_instance(hass).async_clear_statistics(statistic_ids)
-                _LOGGER.info("Cleared statistics for %d entities", len(statistic_ids))
+                _LOGGER.info("Cleared %d statistic streams", len(statistic_ids))
             else:
-                _LOGGER.warning("clear_statistics called but no matching entities found")
+                _LOGGER.warning("clear_statistics called but no matching streams found")
 
         hass.services.async_register(
             DOMAIN, SERVICE_CLEAR_STATISTICS, handle_clear_statistics, schema=CLEAR_STATISTICS_SCHEMA

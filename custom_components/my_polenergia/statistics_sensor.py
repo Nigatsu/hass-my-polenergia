@@ -3,8 +3,8 @@
 import logging
 
 from homeassistant.components.recorder.models import StatisticMeanType, StatisticMetaData
-from homeassistant.components.recorder.statistics import async_import_statistics
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.recorder.statistics import async_add_external_statistics
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
@@ -36,7 +36,10 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity, SensorEntity):
     _device_class: SensorDeviceClass | None = None
     _unit_class: str | None = None
     _unique_suffix: str = ""
-    _attr_state_class = SensorStateClass.TOTAL
+    # No state_class — entity is informational only. The recorder would
+    # otherwise auto-generate hourly statistics from the entity state and
+    # overwrite the externally imported monthly values, producing huge
+    # negative deltas in the Energy Dashboard.
 
     def __init__(
         self,
@@ -70,6 +73,11 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity, SensorEntity):
             manufacturer="Polenergia",
             model="Smart Meter",
         )
+
+    def _external_statistic_id(self) -> str:
+        """External statistic ID — not tied to entity_id, so recorder won't
+        auto-overwrite our imported monthly sums with hourly entity state."""
+        return f"{DOMAIN}:{self.measurement_point.id}_{self.STAT_KEY}"
 
     def _get_stats(self) -> list:
         if not self.coordinator.data:
@@ -114,17 +122,18 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity, SensorEntity):
         mp_statistics = self._get_stats()
 
         if mp_statistics:
+            stat_id = self._external_statistic_id()
             _LOGGER.info(
                 "Importing %d %s statistics for %s",
                 len(mp_statistics),
                 self.STAT_KEY,
-                self.entity_id,
+                stat_id,
             )
 
             metadata = StatisticMetaData(
-                source="recorder",
-                statistic_id=self.entity_id,
-                name=self._attr_name,
+                source=DOMAIN,
+                statistic_id=stat_id,
+                name=f"{self.measurement_point.display_name} {self._attr_name}",
                 unit_of_measurement=self._unit,
                 unit_class=self._unit_class,
                 has_mean=False,
@@ -132,7 +141,7 @@ class _PolEnergiaStatisticsBase(CoordinatorEntity, SensorEntity):
                 mean_type=StatisticMeanType.NONE,
             )
 
-            async_import_statistics(self.hass, metadata, mp_statistics)
+            async_add_external_statistics(self.hass, metadata, mp_statistics)
 
         super()._handle_coordinator_update()
 
