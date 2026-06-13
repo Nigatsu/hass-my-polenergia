@@ -316,9 +316,11 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         """Write one external statistics stream (energy or cost)."""
         if kind == "energy":
             unit = UnitOfEnergy.KILO_WATT_HOUR
+            unit_class = "energy"
             name = f"{mp.display_name} Energy"
         else:
             unit = CURRENCY_PLN
+            unit_class = None  # PLN has no HA unit converter
             name = f"{mp.display_name} Cost"
 
         metadata = StatisticMetaData(
@@ -326,6 +328,7 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
             statistic_id=statistic_id,
             name=name,
             unit_of_measurement=unit,
+            unit_class=unit_class,
             has_mean=False,
             has_sum=True,
             mean_type=StatisticMeanType.NONE,
