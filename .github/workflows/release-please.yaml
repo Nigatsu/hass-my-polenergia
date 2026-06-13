@@ -13,6 +13,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Package + attach the HACS zip in the same job. A release created by
+      # release-please uses GITHUB_TOKEN, which cannot trigger a separate
+      # `on: release` workflow, so the asset must be uploaded here.
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Zip and attach integration
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          cd custom_components/my_polenergia
+          zip -r ../../my_polenergia.zip . -x "*/__pycache__/*" "*.pyc"
+          cd ../..
+          gh release upload "$TAG" my_polenergia.zip --clobber
