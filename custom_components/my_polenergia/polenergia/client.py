@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import aiohttp
+
 from .connector import PolEnergiaConnector
 from .data import EnergyReading, MeasurementPoint, PolEnergiaData
 from .errors import PolEnergiaAPIError, PolEnergiaNoDataError
@@ -20,8 +22,8 @@ def _next_day_utc() -> datetime:
 class PolEnergiaClient:
     """High-level client for PolEnergia API."""
 
-    def __init__(self):
-        self._connector = PolEnergiaConnector()
+    def __init__(self, session: aiohttp.ClientSession | None = None):
+        self._connector = PolEnergiaConnector(session=session)
 
     @property
     def connector(self) -> PolEnergiaConnector:
@@ -124,7 +126,13 @@ class PolEnergiaClient:
         else:
             raise PolEnergiaAPIError(f"Unexpected response format: {type(response)}")
 
-        return [EnergyReading.from_api_response(r) for r in readings_data]
+        readings: list[EnergyReading] = []
+        for r in readings_data:
+            try:
+                readings.append(EnergyReading.from_api_response(r))
+            except ValueError as err:
+                _LOGGER.warning("Skipping unparseable reading: %s", err)
+        return readings
 
     async def get_all_data(self, customer_number: str) -> PolEnergiaData:
         """Get all current data for the account."""
@@ -132,7 +140,7 @@ class PolEnergiaClient:
 
         # Fetch last 13 months to cover current + previous year
         to_date = _next_day_utc()
-        from_date = datetime(to_date.year - 1, to_date.month, 1)
+        from_date = datetime(to_date.year - 1, to_date.month, 1, tzinfo=timezone.utc)
 
         readings_list = await self.get_readings(from_date=from_date, to_date=to_date)
 
@@ -153,7 +161,7 @@ class PolEnergiaClient:
             measurement_points=measurement_points,
             readings=all_readings,
             account_name=account_name,
-            last_update=datetime.now(),
+            last_update=datetime.now(tz=timezone.utc),
         )
 
     @property

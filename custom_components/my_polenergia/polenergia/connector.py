@@ -29,13 +29,24 @@ from .errors import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Per-request timeout. Applied to individual requests rather than the session,
+# because an injected HA-managed session is not ours to configure.
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+
 
 class PolEnergiaConnector:
     """Handles OAuth2 authentication and HTTP requests to PolEnergia API."""
 
-    def __init__(self):
-        """Initialize the connector."""
-        self._session: aiohttp.ClientSession | None = None
+    def __init__(self, session: aiohttp.ClientSession | None = None):
+        """Initialize the connector.
+
+        If ``session`` is provided (e.g. an HA-managed session), it is used as-is
+        and never closed by this connector — its lifecycle belongs to the owner.
+        If omitted, the connector creates and owns its own session (used by the
+        standalone scripts in ``dev/``).
+        """
+        self._session: aiohttp.ClientSession | None = session
+        self._owns_session: bool = session is None
         self._access_token: str | None = None
         self._token_expiry: datetime | None = None
         self._code_verifier: str | None = None
@@ -50,15 +61,20 @@ class PolEnergiaConnector:
 
     async def _ensure_session(self):
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                headers={"User-Agent": USER_AGENT},
-                timeout=aiohttp.ClientTimeout(total=30),
-            )
+            self._session = aiohttp.ClientSession(headers={"User-Agent": USER_AGENT})
+            self._owns_session = True
 
     async def close(self):
-        if self._session and not self._session.closed:
+        """Close the session and clear token state.
+
+        Only an owned (self-created) session is actually closed; an injected
+        HA-managed session is left open for its owner to dispose of.
+        """
+        if self._owns_session and self._session and not self._session.closed:
             await self._session.close()
             self._session = None
+        self._access_token = None
+        self._token_expiry = None
 
     def _generate_pkce_pair(self) -> tuple[str, str]:
         code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("utf-8").rstrip("=")
@@ -99,7 +115,12 @@ class PolEnergiaConnector:
             return_url = f"/connect/authorize/callback?{urlencode(auth_params)}"
 
             # Load login page to get CSRF token
-            async with self._session.get(AUTH_LOGIN_URL, params={"ReturnUrl": return_url}) as response:
+            async with self._session.get(
+                AUTH_LOGIN_URL,
+                params={"ReturnUrl": return_url},
+                headers={"User-Agent": USER_AGENT},
+                timeout=_REQUEST_TIMEOUT,
+            ) as response:
                 if response.status != 200:
                     raise PolEnergiaAuthorizationError(f"Login page returned {response.status}")
                 html = await response.text()
@@ -116,7 +137,13 @@ class PolEnergiaConnector:
             if csrf_token:
                 login_data["__RequestVerificationToken"] = csrf_token
 
-            async with self._session.post(AUTH_LOGIN_URL, data=login_data, allow_redirects=True) as response:
+            async with self._session.post(
+                AUTH_LOGIN_URL,
+                data=login_data,
+                allow_redirects=True,
+                headers={"User-Agent": USER_AGENT},
+                timeout=_REQUEST_TIMEOUT,
+            ) as response:
                 final_url = str(response.url)
                 parsed_url = urlparse(final_url)
                 query_params = parse_qs(parsed_url.query)
@@ -153,7 +180,11 @@ class PolEnergiaConnector:
             async with self._session.post(
                 AUTH_TOKEN_URL,
                 data=token_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": USER_AGENT,
+                },
+                timeout=_REQUEST_TIMEOUT,
             ) as response:
                 if response.status != 200:
                     response_text = await response.text()
@@ -190,10 +221,15 @@ class PolEnergiaConnector:
         await self._ensure_valid_token()
 
         url = f"{API_BASE_URL}/{endpoint.lstrip('/')}"
-        headers = {"Authorization": f"Bearer {self._access_token}"}
+        headers = {
+            "Authorization": f"Bearer {self._access_token}",
+            "User-Agent": USER_AGENT,
+        }
 
         try:
-            async with self._session.get(url, params=params, headers=headers) as response:
+            async with self._session.get(
+                url, params=params, headers=headers, timeout=_REQUEST_TIMEOUT
+            ) as response:
                 if response.status == 401:
                     raise PolEnergiaAuthorizationError("Access token rejected (401)")
                 response.raise_for_status()
@@ -201,6 +237,11 @@ class PolEnergiaConnector:
 
         except aiohttp.ClientError as err:
             raise PolEnergiaConnectionError(f"API request failed: {err}") from err
+
+    @property
+    def access_token(self) -> str | None:
+        """Current access token, if any (read-only)."""
+        return self._access_token
 
     @property
     def is_authenticated(self) -> bool:
