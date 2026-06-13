@@ -1,0 +1,24 @@
+name: Package Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip integration
+        run: |
+          cd custom_components/my_polenergia
+          zip -r ../../my_polenergia.zip . -x "*/__pycache__/*"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: my_polenergia.zip
