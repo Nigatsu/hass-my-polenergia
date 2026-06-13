@@ -9,7 +9,6 @@ DOMAIN = "my_polenergia"
 CONF_CUSTOMER_NUMBER = "customer_number"
 CONF_PASSWORD = "password"
 CONF_ACCOUNT_NAME = "account_name"
-CONF_HISTORICAL_IMPORT_DONE = "historical_import_done"
 CONF_IMPORT_PRICE = "import_price"
 
 # Data update interval
