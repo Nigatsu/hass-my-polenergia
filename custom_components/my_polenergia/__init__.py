@@ -1,14 +1,14 @@
 """My PolEnergia Home Assistant integration."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME, Platform
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -22,11 +22,12 @@ from .const import (
 )
 from .hass_integration.coordinator import PolEnergiaDataUpdateCoordinator
 from .polenergia.client import PolEnergiaClient
-from .polenergia.errors import PolEnergiaAuthorizationError, PolEnergiaConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
+
+type PolEnergiaConfigEntry = ConfigEntry[PolEnergiaDataUpdateCoordinator]
 
 SERVICE_RELOAD_STATISTICS = "reload_statistics"
 SERVICE_CLEAR_STATISTICS = "clear_statistics"
@@ -45,23 +46,22 @@ def _get_price(entry: ConfigEntry) -> float:
 
 async def _rebuild_statistics(
     hass: HomeAssistant,
-    cfg_entry: ConfigEntry,
+    cfg_entry: PolEnergiaConfigEntry,
     from_date: datetime | None = None,
 ) -> None:
     """Re-fetch readings and push fresh energy + cost statistics to recorder."""
-    entry_data = hass.data[DOMAIN].get(cfg_entry.entry_id)
-    if not entry_data:
+    if cfg_entry.state is not ConfigEntryState.LOADED:
         return
 
-    coord: PolEnergiaDataUpdateCoordinator = entry_data["coordinator"]
-    cli: PolEnergiaClient = entry_data["client"]
+    coord = cfg_entry.runtime_data
+    cli: PolEnergiaClient = coord.client
     cust_num = cfg_entry.data[CONF_CUSTOMER_NUMBER]
     price = _get_price(cfg_entry)
 
     if from_date is None:
         from_date = await cli.get_earliest_agreement_date(cust_num)
         if not from_date:
-            from_date = datetime.now() - timedelta(days=730)
+            from_date = datetime.now(tz=timezone.utc) - timedelta(days=730)
             _LOGGER.warning("No agreement date for %s — using 2-year fallback", cfg_entry.title)
 
     if not (coord.data and coord.data.get("data")):
@@ -87,41 +87,16 @@ async def _rebuild_statistics(
     hass.config_entries.async_update_entry(cfg_entry, options=new_options)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: PolEnergiaConfigEntry) -> bool:
     """Set up PolEnergia from a config entry."""
-    username = entry.data[CONF_USERNAME]
-    password = entry.data.get(CONF_PASSWORD)
     customer_number = entry.data[CONF_CUSTOMER_NUMBER]
-
-    if not password:
-        raise ConfigEntryAuthFailed("No password available. Please reconfigure the integration.")
 
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     if isinstance(scan_interval, int):
         scan_interval = timedelta(seconds=scan_interval)
 
-    client = PolEnergiaClient()
-
-    try:
-        # Token kept in client memory only — re-auth on each HA restart.
-        # Persisting via async_update_entry triggers the entry update listener
-        authenticated = await client.authenticate(username, password)
-        if not authenticated:
-            await client.close()
-            raise ConfigEntryAuthFailed("Authentication failed. Please check your credentials.")
-        _LOGGER.info("Authenticated %s", username)
-
-    except PolEnergiaAuthorizationError as err:
-        await client.close()
-        raise ConfigEntryAuthFailed("Authentication failed. Please check your credentials.") from err
-
-    except PolEnergiaConnectionError as err:
-        await client.close()
-        raise ConfigEntryNotReady(f"Connection failed: {err}") from err
-
-    except Exception as err:
-        await client.close()
-        raise ConfigEntryNotReady(f"Setup failed: {err}") from err
+    # HA-managed, integration-owned session (own cookie jar for the login flow).
+    client = PolEnergiaClient(session=async_create_clientsession(hass))
 
     coordinator = PolEnergiaDataUpdateCoordinator(
         hass=hass,
@@ -131,14 +106,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config_entry=entry,
     )
 
+    # Authentication happens in coordinator._async_setup during first refresh.
     await coordinator.async_config_entry_first_refresh()
 
     account_name = entry.data.get(CONF_ACCOUNT_NAME)
     if account_name and entry.title == f"Polenergia ({customer_number})":
         hass.config_entries.async_update_entry(entry, title=f"Polenergia ({account_name})")
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator, "client": client}
+    entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -168,6 +143,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 except ValueError as err:
                     _LOGGER.error("Invalid from_date format: %s — %s", from_date_str, err)
                     return
+                if custom_from_date.tzinfo is None:
+                    custom_from_date = custom_from_date.replace(tzinfo=timezone.utc)
 
             for cfg_entry in hass.config_entries.async_entries(DOMAIN):
                 try:
@@ -183,10 +160,9 @@ def _register_services(hass: HomeAssistant) -> None:
         async def handle_clear_statistics(call: ServiceCall) -> None:
             statistic_ids: list[str] = []
             for cfg_entry in hass.config_entries.async_entries(DOMAIN):
-                entry_data = hass.data[DOMAIN].get(cfg_entry.entry_id)
-                if not entry_data:
+                if cfg_entry.state is not ConfigEntryState.LOADED:
                     continue
-                coord = entry_data["coordinator"]
+                coord = cfg_entry.runtime_data
                 if coord.data and coord.data.get("data"):
                     data = coord.data["data"]
                     for mp in data.measurement_points:
@@ -221,17 +197,11 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: PolEnergiaConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        entry_data = hass.data[DOMAIN].pop(entry.entry_id, {})
-        client = entry_data.get("client")
-        if client:
-            await client.close()
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_update_options(hass: HomeAssistant, entry: PolEnergiaConfigEntry) -> None:
     """Handle options update — reload entry so new scan_interval / price take effect."""
     await hass.config_entries.async_reload(entry.entry_id)

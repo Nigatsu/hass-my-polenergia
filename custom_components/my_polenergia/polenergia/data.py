@@ -36,13 +36,17 @@ class MeasurementPoint:
         address_line2 = data.get("addressLine2", "")
         address = f"{address_line1}, {address_line2}".strip(", ") if address_line1 else address_line2 or ""
 
+        agreement_status = data.get("agreementStatus")
+        if not agreement_status and data.get("agreementId") is not None:
+            agreement_status = str(data.get("agreementId"))
+
         return cls(
             id=measurement_point_id,
             customer_number=customer_number,
             ppe=ppe_number,
             address=address,
             tariff=data.get("tariffName") or data.get("tariff"),
-            agreement_status=data.get("agreementStatus") or str(data.get("agreementId")),
+            agreement_status=agreement_status,
             raw_data=data,
         )
 
@@ -58,27 +62,42 @@ class EnergyReading:
 
     @classmethod
     def from_api_response(cls, data: dict[str, Any]) -> "EnergyReading":
-        """Create EnergyReading from API response."""
+        """Create EnergyReading from API response.
+
+        Raises ``ValueError`` if the row carries no usable timestamp — callers
+        skip such rows rather than fabricating an anchor that would corrupt the
+        monthly statistics stream.
+        """
         timestamp_str = data.get("date") or data.get("timestamp") or data.get("readingDate")
-        if isinstance(timestamp_str, str):
-            for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"]:
-                try:
-                    timestamp = datetime.strptime(timestamp_str, fmt)
-                    break
-                except ValueError:
-                    continue
-            else:
-                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        if not isinstance(timestamp_str, str):
+            raise ValueError(f"Reading has no timestamp: {data!r}")
+
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"]:
+            try:
+                timestamp = datetime.strptime(timestamp_str, fmt)
+                break
+            except ValueError:
+                continue
         else:
-            timestamp = datetime.now()
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
 
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=_POLENERGIA_TZ)
 
+        # Explicit priority — an earlier key holding a legitimate 0 must win over
+        # falling through to the next key (a bare ``or`` chain would skip it).
+        raw_value = data.get("amount")
+        if raw_value is None:
+            raw_value = data.get("value")
+        if raw_value is None:
+            raw_value = data.get("consumption")
+        if raw_value is None:
+            raw_value = 0
+
         mp_id = data.get("measurementPointId")
         return cls(
             timestamp=timestamp,
-            value=float(data.get("amount") or data.get("value") or data.get("consumption") or 0),
+            value=float(raw_value),
             unit=data.get("unit", "kWh"),
             measurement_point_id=str(mp_id) if mp_id else None,
         )

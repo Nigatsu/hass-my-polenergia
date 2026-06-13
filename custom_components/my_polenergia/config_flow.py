@@ -8,6 +8,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -53,24 +54,24 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._password = user_input[CONF_PASSWORD]
 
             try:
-                async with PolEnergiaClient() as client:
-                    authenticated = await client.authenticate(self._username, self._password)
+                client = PolEnergiaClient(session=async_create_clientsession(self.hass))
+                authenticated = await client.authenticate(self._username, self._password)
 
-                    if not authenticated:
-                        errors["base"] = "invalid_auth"
-                    elif not client.connector._access_token:
-                        errors["base"] = "no_access_token"
+                if not authenticated:
+                    errors["base"] = "invalid_auth"
+                elif not client.connector.access_token:
+                    errors["base"] = "no_access_token"
+                else:
+                    self._customer_numbers = await client.get_customer_numbers()
+
+                    if not self._customer_numbers:
+                        errors["base"] = "no_customer_numbers"
+                    elif len(self._customer_numbers) == 1:
+                        customer_number = self._customer_numbers[0]
+                        self._account_name = await client.get_account_name(customer_number)
+                        return await self._create_entry(customer_number)
                     else:
-                        self._customer_numbers = await client.get_customer_numbers()
-
-                        if not self._customer_numbers:
-                            errors["base"] = "no_customer_numbers"
-                        elif len(self._customer_numbers) == 1:
-                            customer_number = self._customer_numbers[0]
-                            self._account_name = await client.get_account_name(customer_number)
-                            return await self._create_entry(customer_number)
-                        else:
-                            return await self.async_step_customer_number()
+                        return await self.async_step_customer_number()
 
             except PolEnergiaAuthorizationError:
                 errors["base"] = "invalid_auth"
@@ -124,9 +125,7 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
-        self._reauth_entry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]
-        )
+        self._reauth_entry = self._get_reauth_entry()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -140,25 +139,25 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             customer_number = self._reauth_entry.data[CONF_CUSTOMER_NUMBER]
 
             try:
-                async with PolEnergiaClient() as client:
-                    authenticated = await client.authenticate(username, password)
+                client = PolEnergiaClient(session=async_create_clientsession(self.hass))
+                authenticated = await client.authenticate(username, password)
 
-                    if not authenticated:
-                        errors["base"] = "invalid_auth"
-                    else:
-                        account_name = await client.get_account_name(customer_number)
-                        new_data = {
-                            **self._reauth_entry.data,
-                            CONF_PASSWORD: password,
-                            CONF_ACCOUNT_NAME: account_name or self._reauth_entry.data.get(CONF_ACCOUNT_NAME),
-                        }
-                        self.hass.config_entries.async_update_entry(
-                            self._reauth_entry,
-                            data=new_data,
-                        )
-                        _LOGGER.info("Successfully re-authenticated %s", username)
-                        await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-                        return self.async_abort(reason="reauth_successful")
+                if not authenticated:
+                    errors["base"] = "invalid_auth"
+                else:
+                    account_name = await client.get_account_name(customer_number)
+                    new_data = {
+                        **self._reauth_entry.data,
+                        CONF_PASSWORD: password,
+                        CONF_ACCOUNT_NAME: account_name or self._reauth_entry.data.get(CONF_ACCOUNT_NAME),
+                    }
+                    self.hass.config_entries.async_update_entry(
+                        self._reauth_entry,
+                        data=new_data,
+                    )
+                    _LOGGER.info("Successfully re-authenticated %s", username)
+                    await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+                    return self.async_abort(reason="reauth_successful")
 
             except PolEnergiaAuthorizationError:
                 errors["base"] = "invalid_auth"
@@ -301,22 +300,22 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
             customer_number = self.config_entry.data[CONF_CUSTOMER_NUMBER]
 
             try:
-                async with PolEnergiaClient() as client:
-                    authenticated = await client.authenticate(username, password)
-                    if not authenticated:
-                        errors["base"] = "invalid_auth"
-                    else:
-                        account_name = await client.get_account_name(customer_number)
-                        new_data = {
-                            **self.config_entry.data,
-                            CONF_PASSWORD: password,
-                            CONF_ACCOUNT_NAME: account_name or self.config_entry.data.get(CONF_ACCOUNT_NAME),
-                        }
-                        self.hass.config_entries.async_update_entry(
-                            self.config_entry, data=new_data
-                        )
-                        await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-                        return self.async_create_entry(title="", data=self.config_entry.options)
+                client = PolEnergiaClient(session=async_create_clientsession(self.hass))
+                authenticated = await client.authenticate(username, password)
+                if not authenticated:
+                    errors["base"] = "invalid_auth"
+                else:
+                    account_name = await client.get_account_name(customer_number)
+                    new_data = {
+                        **self.config_entry.data,
+                        CONF_PASSWORD: password,
+                        CONF_ACCOUNT_NAME: account_name or self.config_entry.data.get(CONF_ACCOUNT_NAME),
+                    }
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry, data=new_data
+                    )
+                    await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                    return self.async_create_entry(title="", data=self.config_entry.options)
 
             except PolEnergiaAuthorizationError:
                 errors["base"] = "invalid_auth"

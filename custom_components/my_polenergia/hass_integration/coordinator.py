@@ -7,6 +7,7 @@ from homeassistant.components.recorder.models import StatisticData
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from ..polenergia.client import PolEnergiaClient
@@ -32,14 +33,44 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
     ):
         self.client = client
         self.customer_number = customer_number
-        self.config_entry = config_entry
 
         super().__init__(
             hass,
             _LOGGER,
             name="Polenergia",
             update_interval=update_interval,
+            config_entry=config_entry,
         )
+
+    async def _async_setup(self) -> None:
+        """One-time authentication before the first refresh.
+
+        ``DataUpdateCoordinator`` calls this once. Raising ``ConfigEntryAuthFailed``
+        starts the reauth flow; raising ``UpdateFailed`` here is converted by HA into
+        ``ConfigEntryNotReady`` (retried later).
+        """
+        username = self.config_entry.data[CONF_USERNAME]
+        password = self.config_entry.data.get(CONF_PASSWORD)
+
+        if not password:
+            raise ConfigEntryAuthFailed(
+                "No password available. Please reconfigure the integration."
+            )
+
+        try:
+            # Token kept in client memory only — re-auth on each HA restart.
+            authenticated = await self.client.authenticate(username, password)
+            if not authenticated:
+                raise ConfigEntryAuthFailed(
+                    "Authentication failed. Please check your credentials."
+                )
+            _LOGGER.info("Authenticated %s", username)
+        except PolEnergiaAuthorizationError as err:
+            raise ConfigEntryAuthFailed(
+                "Authentication failed. Please check your credentials."
+            ) from err
+        except PolEnergiaConnectionError as err:
+            raise UpdateFailed(f"Connection failed: {err}") from err
 
     async def _async_update_data(self) -> dict:
         """Fetch data from API endpoint."""
@@ -52,26 +83,37 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
             }
 
         except PolEnergiaAuthorizationError as err:
+            # Token expiry is expected (token lives in memory only). Try a single
+            # silent re-login. If credentials are now invalid, surface a reauth
+            # flow rather than failing forever.
             _LOGGER.warning("Token expired during data fetch — attempting re-authentication")
 
+            username = self.config_entry.data[CONF_USERNAME]
+            password = self.config_entry.data[CONF_PASSWORD]
+
             try:
-                username = self.config_entry.data[CONF_USERNAME]
-                password = self.config_entry.data[CONF_PASSWORD]
-
                 authenticated = await self.client.authenticate(username, password)
-                if not authenticated:
-                    raise UpdateFailed("Re-authentication failed") from err
+            except PolEnergiaAuthorizationError as reauth_err:
+                raise ConfigEntryAuthFailed("Re-authentication failed") from reauth_err
+            except PolEnergiaConnectionError as conn_err:
+                raise UpdateFailed(f"Connection failed during re-auth: {conn_err}") from conn_err
 
-                _LOGGER.info("Re-authenticated successfully")
+            if not authenticated:
+                raise ConfigEntryAuthFailed("Re-authentication failed") from err
 
+            _LOGGER.info("Re-authenticated successfully")
+
+            try:
                 data = await self.client.get_all_data(customer_number=self.customer_number)
-                return {
-                    "data": data,
-                    "statistics": self.data.get("statistics", {}) if self.data else {},
-                }
+            except PolEnergiaConnectionError as conn_err:
+                raise UpdateFailed(f"Connection failed: {conn_err}") from conn_err
+            except PolEnergiaAPIError as api_err:
+                raise UpdateFailed(f"API error: {api_err}") from api_err
 
-            except Exception as reauth_err:
-                raise UpdateFailed(f"Re-authentication failed: {reauth_err}") from reauth_err
+            return {
+                "data": data,
+                "statistics": self.data.get("statistics", {}) if self.data else {},
+            }
 
         except PolEnergiaConnectionError as err:
             raise UpdateFailed(f"Connection failed: {err}") from err

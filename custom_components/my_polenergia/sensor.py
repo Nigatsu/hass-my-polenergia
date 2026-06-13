@@ -38,7 +38,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up PolEnergia sensors."""
-    coordinator: PolEnergiaDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: PolEnergiaDataUpdateCoordinator = entry.runtime_data
 
     entities = []
     if coordinator.data and coordinator.data.get("data"):
