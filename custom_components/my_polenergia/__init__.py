@@ -1,9 +1,7 @@
 """My PolEnergia Home Assistant integration."""
 
+from datetime import UTC, datetime, timedelta
 import logging
-from datetime import datetime, timedelta, timezone
-
-import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
@@ -12,6 +10,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
+import voluptuous as vol
 
 from .const import (
     CONF_ACCOUNT_NAME,
@@ -113,7 +112,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 _LOGGER.error("Invalid from_date format: %s — %s", from_date_str, err)
                 return
             if from_date.tzinfo is None:
-                from_date = from_date.replace(tzinfo=timezone.utc)
+                from_date = from_date.replace(tzinfo=UTC)
 
         for entry in _loaded_entries(hass):
             coord = entry.runtime_data

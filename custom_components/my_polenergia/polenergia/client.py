@@ -1,7 +1,7 @@
 """PolEnergia API client - high-level interface."""
 
+from datetime import UTC, datetime, timedelta
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def _next_day_utc() -> datetime:
     """Tomorrow at 00:00 UTC — exclusive upper bound for half-open [from, to) queries."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
 
 
@@ -140,7 +140,7 @@ class PolEnergiaClient:
 
         # Fetch last 13 months to cover current + previous year
         to_date = _next_day_utc()
-        from_date = datetime(to_date.year - 1, to_date.month, 1, tzinfo=timezone.utc)
+        from_date = datetime(to_date.year - 1, to_date.month, 1, tzinfo=UTC)
 
         readings_list = await self.get_readings(from_date=from_date, to_date=to_date)
 
@@ -161,7 +161,7 @@ class PolEnergiaClient:
             measurement_points=measurement_points,
             readings=all_readings,
             account_name=account_name,
-            last_update=datetime.now(tz=timezone.utc),
+            last_update=datetime.now(tz=UTC),
         )
 
     @property

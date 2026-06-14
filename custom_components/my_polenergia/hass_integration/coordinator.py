@@ -1,7 +1,7 @@
 """Data update coordinator for PolEnergia integration."""
 
+from datetime import UTC, datetime, timedelta
 import logging
-from datetime import datetime, timedelta, timezone
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
@@ -231,13 +231,13 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
             return from_date
         # Resume: refetch a couple of months back from the oldest stored point.
         if resume_from is not None:
-            return datetime.fromtimestamp(resume_from, tz=timezone.utc) - _RESUME_LOOKBACK
+            return datetime.fromtimestamp(resume_from, tz=UTC) - _RESUME_LOOKBACK
         # First run / full rebuild with no explicit date: go back to the start.
         earliest = await self.client.get_earliest_agreement_date(self.customer_number)
         if earliest:
             return earliest
         _LOGGER.warning("No agreement date for %s — using 2-year fallback", self.config_entry.title)
-        return datetime.now(tz=timezone.utc) - _FALLBACK_HISTORY
+        return datetime.now(tz=UTC) - _FALLBACK_HISTORY
 
     def _import_measurement_point(
         self,
@@ -283,8 +283,8 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Anchor the start of the current month at zero delta so the dashboard
         # doesn't extrapolate forward from the last real (end-of-month) point.
-        now = datetime.now(tz=timezone.utc)
-        current_month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        now = datetime.now(tz=UTC)
+        current_month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
         if energy_stats[-1]["start"] < current_month_start:
             energy_stats.append(StatisticData(
                 start=current_month_start, state=0.0, sum=energy_sum

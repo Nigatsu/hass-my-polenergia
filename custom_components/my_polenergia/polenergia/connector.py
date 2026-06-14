@@ -1,21 +1,19 @@
 """OAuth2 connector for PolEnergia API."""
 
 import base64
+from datetime import datetime, timedelta
 import hashlib
-import json
 import logging
 import secrets
-from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import aiohttp
 
 from .const import (
+    API_BASE_URL,
     AUTH_LOGIN_URL,
     AUTH_TOKEN_URL,
-    AUTH_AUTHORIZE_URL,
-    API_BASE_URL,
     CLIENT_ID,
     REDIRECT_URI,
     RESPONSE_TYPE,
