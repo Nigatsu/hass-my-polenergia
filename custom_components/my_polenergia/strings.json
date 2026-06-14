@@ -98,12 +98,6 @@
       "last_month_consumption": {
         "name": "Last Month Consumption"
       },
-      "historical_statistics": {
-        "name": "Historical Statistics"
-      },
-      "cost_statistics": {
-        "name": "Cost Statistics"
-      },
       "import_price": {
         "name": "Import Price"
       }
