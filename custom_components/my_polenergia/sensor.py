@@ -107,7 +107,6 @@ class PolEnergiaMonthlyConsumptionSensor(PolEnergiaBaseSensor):
         super().__init__(coordinator, measurement_point, entry)
 
         self._attr_translation_key = "last_month_consumption"
-        self._attr_name = "Last Month Consumption"
         self._attr_unique_id = f"{measurement_point.id}_reading"
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
@@ -144,7 +143,6 @@ class PolEnergiaImportPriceSensor(PolEnergiaBaseSensor):
         super().__init__(coordinator, measurement_point, entry)
 
         self._attr_translation_key = "import_price"
-        self._attr_name = "Import Price"
         self._attr_unique_id = f"{measurement_point.id}_import_price"
         self._attr_native_unit_of_measurement = f"{CURRENCY_PLN}/kWh"
         self._attr_icon = "mdi:currency-eur"
