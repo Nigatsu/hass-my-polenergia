@@ -23,15 +23,6 @@ async def async_get_config_entry_diagnostics(
         },
     }
 
-    statistics = coordinator.data.get("statistics", {}) if coordinator.data else {}
-    diagnostics_data["statistics_counts"] = {
-        mp_id: {
-            "energy": len(streams.get("energy", [])) if isinstance(streams, dict) else len(streams),
-            "cost": len(streams.get("cost", [])) if isinstance(streams, dict) else 0,
-        }
-        for mp_id, streams in statistics.items()
-    }
-
     if coordinator.data and coordinator.data.get("data"):
         data = coordinator.data["data"]
         diagnostics_data["data"] = {

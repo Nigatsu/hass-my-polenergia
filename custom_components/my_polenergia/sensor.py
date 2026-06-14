@@ -27,7 +27,6 @@ from .const import (
 )
 from .hass_integration.coordinator import PolEnergiaDataUpdateCoordinator
 from .polenergia.data import MeasurementPoint
-from .statistics_sensor import PolEnergiaCostStatisticsSensor, PolEnergiaStatisticsSensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,8 +44,6 @@ async def async_setup_entry(
         data = coordinator.data["data"]
         for mp in data.measurement_points:
             entities.append(PolEnergiaMonthlyConsumptionSensor(coordinator, mp, entry))
-            entities.append(PolEnergiaStatisticsSensor(hass, coordinator, mp, entry))
-            entities.append(PolEnergiaCostStatisticsSensor(hass, coordinator, mp, entry))
             entities.append(PolEnergiaImportPriceSensor(coordinator, mp, entry))
 
     if entities:
