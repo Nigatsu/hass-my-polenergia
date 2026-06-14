@@ -98,12 +98,6 @@
       "last_month_consumption": {
         "name": "Zużycie za ostatni miesiąc"
       },
-      "historical_statistics": {
-        "name": "Statystyki historyczne"
-      },
-      "cost_statistics": {
-        "name": "Statystyki kosztów"
-      },
       "import_price": {
         "name": "Cena poboru"
       }

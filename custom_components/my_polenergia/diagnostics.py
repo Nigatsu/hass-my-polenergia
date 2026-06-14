@@ -2,8 +2,12 @@
 
 from typing import Any
 
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+
+# PII that lands in files users attach to public GitHub issues.
+TO_REDACT = {"address", "ppe"}
 
 
 async def async_get_config_entry_diagnostics(
@@ -47,4 +51,4 @@ async def async_get_config_entry_diagnostics(
             else None,
         }
 
-    return diagnostics_data
+    return async_redact_data(diagnostics_data, TO_REDACT)
