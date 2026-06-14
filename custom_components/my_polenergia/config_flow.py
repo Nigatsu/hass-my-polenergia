@@ -6,7 +6,7 @@ from typing import Any
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -73,6 +73,10 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     else:
                         return await self.async_step_customer_number()
 
+            except AbortFlow:
+                # e.g. account already configured — must propagate, not be
+                # swallowed by the broad handler below.
+                raise
             except PolEnergiaAuthorizationError:
                 errors["base"] = "invalid_auth"
             except PolEnergiaConnectionError:

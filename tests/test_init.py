@@ -1,7 +1,7 @@
 """Setup, unload and coordinator behaviour tests."""
 
 from datetime import timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -10,6 +10,12 @@ import pytest
 
 from custom_components.my_polenergia.hass_integration.coordinator import (
     PolEnergiaDataUpdateCoordinator,
+)
+
+# Patch target: keep the coordinator off the recorder during full setup.
+_IMPORT_STATS = (
+    "custom_components.my_polenergia.hass_integration.coordinator"
+    ".PolEnergiaDataUpdateCoordinator.import_statistics"
 )
 from custom_components.my_polenergia.polenergia.errors import (
     PolEnergiaAuthorizationError,
@@ -20,13 +26,14 @@ from .conftest import CUSTOMER_NUMBER, make_data
 
 
 async def test_setup_and_unload(
-    recorder_mock, hass: HomeAssistant, mock_client, mock_config_entry
+    hass: HomeAssistant, mock_client, mock_config_entry
 ) -> None:
     """Happy path: entry loads, sensors are created, then unloads cleanly."""
     mock_config_entry.add_to_hass(hass)
 
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
+    with patch(_IMPORT_STATS, new=AsyncMock()):
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
 
     assert mock_config_entry.state is ConfigEntryState.LOADED
     # Two sensors per measurement point: monthly consumption + import price.
@@ -38,7 +45,7 @@ async def test_setup_and_unload(
 
 
 async def test_setup_auth_failure_starts_reauth(
-    recorder_mock, hass: HomeAssistant, mock_client, mock_config_entry
+    hass: HomeAssistant, mock_client, mock_config_entry
 ) -> None:
     """Bad credentials at setup → SETUP_ERROR and a reauth flow is started."""
     mock_client.authenticate.return_value = False
@@ -53,7 +60,7 @@ async def test_setup_auth_failure_starts_reauth(
 
 
 async def test_setup_connection_failure_not_loaded(
-    recorder_mock, hass: HomeAssistant, mock_client, mock_config_entry
+    hass: HomeAssistant, mock_client, mock_config_entry
 ) -> None:
     """A connection error at setup leaves the entry not loaded (retry)."""
     mock_client.authenticate.side_effect = PolEnergiaConnectionError("down")
