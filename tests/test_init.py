@@ -11,18 +11,18 @@ import pytest
 from custom_components.my_polenergia.hass_integration.coordinator import (
     PolEnergiaDataUpdateCoordinator,
 )
-
-# Patch target: keep the coordinator off the recorder during full setup.
-_IMPORT_STATS = (
-    "custom_components.my_polenergia.hass_integration.coordinator"
-    ".PolEnergiaDataUpdateCoordinator.import_statistics"
-)
 from custom_components.my_polenergia.polenergia.errors import (
     PolEnergiaAuthorizationError,
     PolEnergiaConnectionError,
 )
 
 from .conftest import CUSTOMER_NUMBER, make_data
+
+# Patch target: keep the coordinator off the recorder during full setup.
+_IMPORT_STATS = (
+    "custom_components.my_polenergia.hass_integration.coordinator"
+    ".PolEnergiaDataUpdateCoordinator.import_statistics"
+)
 
 
 async def test_setup_and_unload(
