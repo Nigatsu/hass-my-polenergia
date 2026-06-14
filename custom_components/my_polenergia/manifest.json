@@ -1,14 +1,14 @@
 {
   "domain": "my_polenergia",
   "name": "My Polenergia",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@Nigatsu"
   ],
   "config_flow": true,
   "dependencies": [],
-  "after_dependencies": [
-    "recorder"
-  ],
   "documentation": "https://github.com/Nigatsu/hass-my-polenergia",
   "integration_type": "device",
   "iot_class": "cloud_polling",
