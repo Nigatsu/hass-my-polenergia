@@ -1,0 +1,6 @@
+# Test + lint dependencies. pytest-homeassistant-custom-component pulls a
+# matching Home Assistant and pytest stack; pin a floor and let CI resolve the
+# latest compatible release for the pinned Python.
+pytest-homeassistant-custom-component>=0.13.0
+pytest-cov
+ruff>=0.6.0
