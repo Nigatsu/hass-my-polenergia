@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/Nigatsu/hass-my-polenergia/compare/v1.6.0...v1.7.0) (2026-09-18)
+
+
+### Features
+
+* Multi-zone tariffs approach ([#11](https://github.com/Nigatsu/hass-my-polenergia/issues/11)) ([a031ceb](https://github.com/Nigatsu/hass-my-polenergia/commit/a031cebcc538aaca723c1f48fd550cbf48de3a1c))
+
 ## [1.6.0](https://github.com/Nigatsu/hass-my-polenergia/compare/v1.5.0...v1.6.0) (2026-06-14)
 
 
