@@ -129,3 +129,6 @@ dev/
 temp/
 tmp/
 .claude/
+
+# Private project knowledge (not for distribution)
+/CLAUDE.md

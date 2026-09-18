@@ -52,9 +52,12 @@
       },
       "set_price": {
         "title": "Ustaw cenę energii",
-        "description": "Cena za 1 kWh w PLN — używana do obliczania miesięcznych kosztów w Panelu Energii.",
+        "description": "Cena za 1 kWh w PLN — używana do obliczania miesięcznych kosztów w Panelu Energii.\n\nWykryte strefy taryfowe: {zones}\n\nJeśli licznik raportuje strefy taryfowe, dla każdej strefy pojawi się osobne pole ceny. Użyj ręcznego ustawienia stref tylko wtedy, gdy grupa taryfowa nie została wykryta poprawnie.",
         "data": {
-          "import_price": "Cena poboru (PLN/kWh)"
+          "import_price": "Cena poboru (PLN/kWh)",
+          "import_price_z2": "Cena poboru — strefa nocna (PLN/kWh)",
+          "import_price_z3": "Cena poboru — strefa pozaszczytowa (PLN/kWh)",
+          "zone_count": "Strefy taryfowe (auto = wykryj z grupy taryfowej)"
         }
       },
       "scan_interval": {

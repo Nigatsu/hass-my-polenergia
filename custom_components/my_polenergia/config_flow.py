@@ -4,9 +4,10 @@ import logging
 from typing import Any
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import AbortFlow, FlowResult
+from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -15,10 +16,13 @@ from .const import (
     CONF_ACCOUNT_NAME,
     CONF_CUSTOMER_NUMBER,
     CONF_IMPORT_PRICE,
+    CONF_ZONE_COUNT,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MIN_SCAN_INTERVAL,
+    ZONE_COUNT_AUTO,
+    import_price_key,
 )
 from .polenergia.client import PolEnergiaClient
 from .polenergia.errors import (
@@ -26,6 +30,7 @@ from .polenergia.errors import (
     PolEnergiaConnectionError,
     PolEnergiaError,
 )
+from .polenergia.tariffs import zone_count, zone_display_name, zone_keys_for_count
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +51,7 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors = {}
 
         if user_input is not None:
@@ -98,7 +103,7 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_customer_number(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             customer_number = user_input[CONF_CUSTOMER_NUMBER]
             return await self._create_entry(customer_number)
@@ -112,7 +117,7 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
         )
 
-    async def _create_entry(self, customer_number: str) -> FlowResult:
+    async def _create_entry(self, customer_number: str) -> ConfigFlowResult:
         await self.async_set_unique_id(f"{self._username}_{customer_number}")
         self._abort_if_unique_id_configured()
 
@@ -128,13 +133,13 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         self._reauth_entry = self._get_reauth_entry()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors = {}
 
         if user_input is not None:
@@ -191,7 +196,7 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
             menu_options=[
@@ -203,28 +208,80 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
             ],
         )
 
+    def _detected_zone_keys(self) -> list[str]:
+        """Zone slugs to show price fields for.
+
+        Precedence: an explicit user override, then the zones actually present in
+        the readings, then the zone count implied by the detected tariff group.
+        Single-zone accounts get exactly the one field they have today.
+        """
+        override = self.config_entry.options.get(CONF_ZONE_COUNT, ZONE_COUNT_AUTO)
+        if override != ZONE_COUNT_AUTO:
+            try:
+                return zone_keys_for_count(int(override))
+            except (TypeError, ValueError):
+                pass
+
+        # runtime_data is only populated while the entry is loaded; fall back to
+        # whatever prices are already stored if it is not.
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is not None:
+            seen = {zone for zones in coordinator.zones_seen.values() for zone in zones}
+            if seen:
+                return sorted(seen)
+            data = (coordinator.data or {}).get("data")
+            if data is not None:
+                counts = [zone_count(mp.tariff) for mp in data.measurement_points if mp.tariff]
+                if counts:
+                    return zone_keys_for_count(max(counts))
+
+        stored = [
+            zone
+            for zone in ("z1", "z2", "z3")
+            if self.config_entry.options.get(import_price_key(zone)) is not None
+        ]
+        return zone_keys_for_count(len(stored) + 1) if stored else []
+
     async def async_step_set_price(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
+        zone_keys = self._detected_zone_keys()
+
         if user_input is not None:
             new_options = {**self.config_entry.options, **user_input}
             return self.async_create_entry(title="", data=new_options)
 
-        current_price = float(self.config_entry.options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE))
+        options = self.config_entry.options
+        price = vol.All(vol.Coerce(float), vol.Range(min=0.0))
+        schema: dict[Any, Any] = {}
+
+        if zone_keys:
+            # Zone 1 reuses CONF_IMPORT_PRICE so an existing single-rate setting
+            # carries over instead of resetting to the placeholder.
+            for zone in zone_keys:
+                key = import_price_key(zone if zone != "z1" else None)
+                default = float(options.get(key, options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE)))
+                schema[vol.Required(key, default=default)] = price
+        else:
+            default = float(options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE))
+            schema[vol.Required(CONF_IMPORT_PRICE, default=default)] = price
+
+        current_override = options.get(CONF_ZONE_COUNT, ZONE_COUNT_AUTO)
+        schema[vol.Optional(CONF_ZONE_COUNT, default=current_override)] = vol.In(
+            [ZONE_COUNT_AUTO, "1", "2", "3"]
+        )
 
         return self.async_show_form(
             step_id="set_price",
-            data_schema=vol.Schema({
-                vol.Required(CONF_IMPORT_PRICE, default=current_price): vol.All(
-                    vol.Coerce(float),
-                    vol.Range(min=0.0),
-                ),
-            }),
+            data_schema=vol.Schema(schema),
+            description_placeholders={
+                "zones": ", ".join(zone_display_name(z) for z in zone_keys) or "—",
+            },
         )
 
     async def async_step_scan_interval(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             new_options = {**self.config_entry.options, **user_input}
             return self.async_create_entry(title="", data=new_options)
@@ -247,7 +304,7 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_reload_history(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -278,7 +335,7 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_clear_stats(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             if user_input.get("confirm"):
                 await self.hass.services.async_call(
@@ -295,7 +352,7 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_change_credentials(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:

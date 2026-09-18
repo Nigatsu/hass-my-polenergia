@@ -20,6 +20,7 @@ from .const import (
     ATTR_LAST_UPDATE,
     ATTR_PPE,
     ATTR_TARIFF,
+    ATTR_ZONE_COUNT,
     CONF_IMPORT_PRICE,
     CURRENCY_PLN,
     DEFAULT_IMPORT_PRICE,
@@ -27,6 +28,7 @@ from .const import (
 )
 from .hass_integration.coordinator import PolEnergiaDataUpdateCoordinator
 from .polenergia.data import MeasurementPoint
+from .polenergia.tariffs import zone_count
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,6 +86,7 @@ class PolEnergiaBaseSensor(CoordinatorEntity, SensorEntity):
 
         if self.measurement_point.tariff:
             attrs[ATTR_TARIFF] = self.measurement_point.tariff
+            attrs[ATTR_ZONE_COUNT] = zone_count(self.measurement_point.tariff)
 
         if self.coordinator.data and self.coordinator.data.get("data"):
             data = self.coordinator.data["data"]

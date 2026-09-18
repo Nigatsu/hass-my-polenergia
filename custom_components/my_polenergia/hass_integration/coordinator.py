@@ -27,6 +27,12 @@ from ..polenergia.errors import (
     PolEnergiaAuthorizationError,
     PolEnergiaConnectionError,
 )
+from ..polenergia.tariffs import (
+    DIRECTION_EXPORT,
+    DIRECTION_IMPORT,
+    zone_count,
+    zone_display_name,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +56,11 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
     ):
         self.client = client
         self.customer_number = customer_number
+        # Zone slugs actually seen in readings, per measurement point id. Read by
+        # the options flow to decide how many price fields to render. Kept on the
+        # coordinator rather than written to the config entry, because calling
+        # async_update_entry during a refresh causes a reload loop.
+        self.zones_seen: dict[str, list[str]] = {}
 
         super().__init__(
             hass,
@@ -147,8 +158,26 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
     # Statistics import (Energy Dashboard)                               #
     # ------------------------------------------------------------------ #
 
-    def _price(self) -> float:
-        return float(self.config_entry.options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE))
+    def _price(self, zone: str | None = None) -> float:
+        """Price for a tariff zone, falling back to the single configured rate.
+
+        A multi-zone user who has not set per-zone prices still gets a correct
+        energy stream and a blended-rate cost, rather than an error.
+        """
+        options = self.config_entry.options
+        if zone:
+            zone_price = options.get(f"{CONF_IMPORT_PRICE}_{zone}")
+            if zone_price is not None:
+                return float(zone_price)
+        return float(options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE))
+
+    def tariff_zone_count(self, measurement_points: list[MeasurementPoint]) -> int:
+        """Zone count for the account: what the data shows, else what the tariff implies."""
+        seen = {zone for zones in self.zones_seen.values() for zone in zones}
+        if seen:
+            return max(len(seen), 1)
+        counts = [zone_count(mp.tariff) for mp in measurement_points if mp.tariff]
+        return max(counts) if counts else 1
 
     async def _last_stat_sum(self, statistic_id: str) -> tuple[float, float] | None:
         """Return (last_sum, last_start_timestamp) for a stream, or None if empty."""
@@ -181,29 +210,21 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         if not measurement_points:
             return
 
-        price = self._price()
         single_meter = len(measurement_points) == 1
 
-        # Per-mp baselines: (energy_sum, cost_sum, last_start_ts | None).
-        baselines: dict[str, tuple[float, float, float | None]] = {}
+        # The fetch window is decided from the always-present total energy stream;
+        # per-zone streams are discovered from the readings and resumed
+        # individually in _import_measurement_point.
         earliest_seen: float | None = None
-        any_missing = False
+        any_missing = full_rebuild
 
-        if full_rebuild:
-            for mp in measurement_points:
-                baselines[mp.id] = (0.0, 0.0, None)
-            any_missing = True
-        else:
+        if not full_rebuild:
             for mp in measurement_points:
                 energy_last = await self._last_stat_sum(f"{DOMAIN}:{mp.id}_energy")
-                cost_last = await self._last_stat_sum(f"{DOMAIN}:{mp.id}_cost")
                 if energy_last is None:
-                    baselines[mp.id] = (0.0, 0.0, None)
                     any_missing = True  # new/first-run meter needs full history
                     continue
-                energy_sum, last_ts = energy_last
-                cost_sum = cost_last[0] if cost_last else 0.0
-                baselines[mp.id] = (energy_sum, cost_sum, last_ts)
+                _energy_sum, last_ts = energy_last
                 earliest_seen = last_ts if earliest_seen is None else min(earliest_seen, last_ts)
 
         # If every meter already has stats, resume from the recent window;
@@ -216,9 +237,8 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
             return
 
         for mp in measurement_points:
-            energy_sum, cost_sum, last_ts = baselines[mp.id]
-            self._import_measurement_point(
-                mp, readings, single_meter, price, energy_sum, cost_sum, last_ts
+            await self._import_measurement_point(
+                mp, readings, single_meter, full_rebuild=full_rebuild
             )
 
     async def _resolve_fetch_from(
@@ -239,17 +259,21 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.warning("No agreement date for %s — using 2-year fallback", self.config_entry.title)
         return datetime.now(tz=UTC) - _FALLBACK_HISTORY
 
-    def _import_measurement_point(
+    async def _import_measurement_point(
         self,
         mp: MeasurementPoint,
         readings: list[EnergyReading],
         single_meter: bool,
-        price: float,
-        energy_sum: float,
-        cost_sum: float,
-        last_ts: float | None,
+        *,
+        full_rebuild: bool,
     ) -> None:
-        """Build and write the energy + cost streams for one measurement point."""
+        """Build and write every statistics stream for one measurement point.
+
+        Always writes the total energy + cost streams. When the API supplies a
+        zone dimension, per-zone energy + cost streams are written alongside the
+        total (never instead of it, so existing history keeps working). Export
+        rows go to a separate return stream and are never mixed into consumption.
+        """
         mp_readings = [r for r in readings if r.measurement_point_id == mp.id]
         if not mp_readings and single_meter:
             # API omits the id on single-meter accounts — attribute all readings.
@@ -259,69 +283,159 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
 
         mp_readings.sort(key=lambda r: r.period_anchor)
 
+        imports = [r for r in mp_readings if r.direction == DIRECTION_IMPORT]
+        exports = [r for r in mp_readings if r.direction == DIRECTION_EXPORT]
+
+        zones = sorted({r.zone for r in imports if r.zone is not None})
+        self.zones_seen[mp.id] = zones
+
+        # Total import: sum the zones of each period back together.
+        totals = self._sum_by_period(imports)
+        await self._write_energy_and_cost(mp, None, totals, full_rebuild=full_rebuild)
+
+        for zone in zones:
+            per_zone = self._sum_by_period([r for r in imports if r.zone == zone])
+            await self._write_energy_and_cost(mp, zone, per_zone, full_rebuild=full_rebuild)
+
+        if exports:
+            await self._write_return(mp, None, self._sum_by_period(exports),
+                                     full_rebuild=full_rebuild)
+            for zone in sorted({r.zone for r in exports if r.zone is not None}):
+                per_zone = self._sum_by_period([r for r in exports if r.zone == zone])
+                await self._write_return(mp, zone, per_zone, full_rebuild=full_rebuild)
+
+    @staticmethod
+    def _sum_by_period(readings: list[EnergyReading]) -> list[tuple[datetime, float]]:
+        """Collapse readings to one (period_anchor, kWh) pair per period, in order."""
+        totals: dict[datetime, float] = {}
+        for reading in readings:
+            anchor = reading.period_anchor
+            totals[anchor] = totals.get(anchor, 0.0) + reading.value
+        return sorted(totals.items())
+
+    async def _write_energy_and_cost(
+        self,
+        mp: MeasurementPoint,
+        zone: str | None,
+        periods: list[tuple[datetime, float]],
+        *,
+        full_rebuild: bool,
+    ) -> None:
+        """Write the energy + cost pair for one zone (or the account total)."""
+        if not periods:
+            return
+
+        suffix = f"_{zone}" if zone else ""
+        energy_id = f"{DOMAIN}:{mp.id}_energy{suffix}"
+        cost_id = f"{DOMAIN}:{mp.id}_cost{suffix}"
+        price = self._price(zone)
+
+        energy_sum, cost_sum, last_ts = 0.0, 0.0, None
+        if not full_rebuild:
+            if (energy_last := await self._last_stat_sum(energy_id)) is not None:
+                energy_sum, last_ts = energy_last
+            if (cost_last := await self._last_stat_sum(cost_id)) is not None:
+                cost_sum = cost_last[0]
+
         energy_stats: list[StatisticData] = []
         cost_stats: list[StatisticData] = []
 
-        for reading in mp_readings:
-            if last_ts is not None and reading.period_anchor.timestamp() <= last_ts:
+        for anchor, value in periods:
+            if last_ts is not None and anchor.timestamp() <= last_ts:
                 continue  # already imported
-            energy_sum += reading.value
-            cost_sum += reading.value * price
-            energy_stats.append(StatisticData(
-                start=reading.period_anchor,
-                state=reading.value,
-                sum=energy_sum,
-            ))
-            cost_stats.append(StatisticData(
-                start=reading.period_anchor,
-                state=reading.value * price,
-                sum=cost_sum,
-            ))
+            # A correction row must never drive the cumulative sum backwards.
+            value = max(0.0, value)
+            cost = value * price
+            energy_sum += value
+            cost_sum += cost
+            energy_stats.append(StatisticData(start=anchor, state=value, sum=energy_sum))
+            cost_stats.append(StatisticData(start=anchor, state=cost, sum=cost_sum))
 
         if not energy_stats:
-            return  # nothing new for this meter
+            return  # nothing new for this stream
 
-        # Anchor the start of the current month at zero delta so the dashboard
-        # doesn't extrapolate forward from the last real (end-of-month) point.
-        now = datetime.now(tz=UTC)
-        current_month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
-        if energy_stats[-1]["start"] < current_month_start:
-            energy_stats.append(StatisticData(
-                start=current_month_start, state=0.0, sum=energy_sum
-            ))
-            cost_stats.append(StatisticData(
-                start=current_month_start, state=0.0, sum=cost_sum
-            ))
+        self._append_current_month_anchor(energy_stats, energy_sum)
+        self._append_current_month_anchor(cost_stats, cost_sum)
 
-        self._add_external(f"{DOMAIN}:{mp.id}_energy", mp, "energy", energy_stats)
-        self._add_external(f"{DOMAIN}:{mp.id}_cost", mp, "cost", cost_stats)
+        label = zone_display_name(zone)
+        energy_name = f"{mp.display_name} Energy" + (f" ({label})" if label else "")
+        cost_name = f"{mp.display_name} Cost" + (f" ({label})" if label else "")
+
+        self._add_external(energy_id, "energy", energy_name, energy_stats)
+        self._add_external(cost_id, "cost", cost_name, cost_stats)
 
         _LOGGER.info(
-            "Imported %d new %s-stream points for %s (total %.1f kWh, %.2f PLN @ %.4f PLN/kWh)",
+            "Imported %d new points for %s%s (total %.1f kWh, %.2f PLN @ %.4f PLN/kWh)",
             len(energy_stats),
-            "energy/cost",
             mp.id,
+            f" zone {label}" if label else "",
             energy_sum,
             cost_sum,
             price,
         )
 
+    async def _write_return(
+        self,
+        mp: MeasurementPoint,
+        zone: str | None,
+        periods: list[tuple[datetime, float]],
+        *,
+        full_rebuild: bool,
+    ) -> None:
+        """Write the energy-returned-to-grid stream for a prosumer meter."""
+        if not periods:
+            return
+
+        suffix = f"_{zone}" if zone else ""
+        return_id = f"{DOMAIN}:{mp.id}_return{suffix}"
+
+        return_sum, last_ts = 0.0, None
+        if not full_rebuild and (last := await self._last_stat_sum(return_id)) is not None:
+            return_sum, last_ts = last
+
+        stats: list[StatisticData] = []
+        for anchor, value in periods:
+            if last_ts is not None and anchor.timestamp() <= last_ts:
+                continue
+            value = max(0.0, value)
+            return_sum += value
+            stats.append(StatisticData(start=anchor, state=value, sum=return_sum))
+
+        if not stats:
+            return
+
+        self._append_current_month_anchor(stats, return_sum)
+
+        label = zone_display_name(zone)
+        name = f"{mp.display_name} Returned" + (f" ({label})" if label else "")
+        self._add_external(return_id, "energy", name, stats)
+
+    @staticmethod
+    def _append_current_month_anchor(stats: list[StatisticData], running_sum: float) -> None:
+        """Anchor the start of the current month at zero delta.
+
+        Without it the Energy Dashboard extrapolates forward from the last real
+        (end-of-month) point.
+        """
+        now = datetime.now(tz=UTC)
+        current_month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
+        if stats[-1]["start"] < current_month_start:
+            stats.append(StatisticData(start=current_month_start, state=0.0, sum=running_sum))
+
     def _add_external(
         self,
         statistic_id: str,
-        mp: MeasurementPoint,
         kind: str,
+        name: str,
         stats: list[StatisticData],
     ) -> None:
         """Write one external statistics stream (energy or cost)."""
         if kind == "energy":
             unit = UnitOfEnergy.KILO_WATT_HOUR
             unit_class = "energy"
-            name = f"{mp.display_name} Energy"
         else:
             unit = CURRENCY_PLN
             unit_class = None  # PLN has no HA unit converter
-            name = f"{mp.display_name} Cost"
 
         metadata = StatisticMetaData(
             source=DOMAIN,
