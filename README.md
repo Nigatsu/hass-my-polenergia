@@ -133,8 +133,15 @@ Both services are also reachable from the Options menu (**Reload Historical Stat
 
 - **Monthly granularity only.** No hourly or daily data — Polenergia's API doesn't expose it.
 - **PLN only.** Cost calculation assumes Polish złoty.
-- **Single import rate.** Currently no zone-aware pricing (G12/G12w/G13). This is **not confirmed as an API limitation** — I only have a single-zone (G11) meter to test against, so the readings I see are flat. The Polenergia API may well return zone-split readings or different fields for G12/G12w/G13 contracts that I simply can't observe. If you're on a multi-zone tariff and willing to share anonymised API responses (or open an issue with what you see), I'd love to add proper zone support.
-- **No prosumer / export tracking.** Same caveat — I don't have a prosumer (PV producer-consumer) contract on Polenergia, so I haven't seen export readings in the API responses. The endpoints may exist; data from prosumer users would help confirm or rule it out.
+- **Multi-zone tariffs (G12/G12w/G13) are supported but unverified.** Your tariff group is
+  detected automatically (from the contract data) and shown on the sensor. If the API
+  returns zone-split readings, per-zone statistics and per-zone price fields appear on their
+  own — no configuration needed. On the single-zone (G11) meter I can test against, the
+  readings are flat, so **whether Polenergia actually splits readings by zone is still
+  unconfirmed**.
+- **No verified prosumer / export tracking.** Export (feed-in) readings are recognised and
+  written to a separate "Returned" statistic so they never pollute consumption, but I have
+  no prosumer contract to confirm the API exposes them at all.
 
 ---
 

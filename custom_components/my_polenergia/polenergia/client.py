@@ -7,8 +7,15 @@ from typing import Any
 import aiohttp
 
 from .connector import PolEnergiaConnector
-from .data import EnergyReading, MeasurementPoint, PolEnergiaData
+from .data import (
+    EnergyReading,
+    MeasurementPoint,
+    PolEnergiaData,
+    aggregate_readings,
+    parse_readings,
+)
 from .errors import PolEnergiaAPIError, PolEnergiaNoDataError
+from .tariffs import DIRECTION_EXPORT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +31,15 @@ class PolEnergiaClient:
 
     def __init__(self, session: aiohttp.ClientSession | None = None):
         self._connector = PolEnergiaConnector(session=session)
+        # Memo so one refresh hits /Agreements once for both the tariff map and
+        # the earliest agreement date. Reset at the start of get_all_data.
+        self._agreements_cache: dict[str, list[dict[str, Any]]] = {}
+        # Evidence captured from the last readings call, surfaced in diagnostics
+        # so a multi-zone or prosumer user can be asked about the payload once.
+        self.last_unknown_reading_fields: set[str] = set()
+        self.last_envelope_keys: list[str] = []
+        self.last_reading_sample: list[dict[str, Any]] = []
+        self._logged_export = False
 
     @property
     def connector(self) -> PolEnergiaConnector:
@@ -62,12 +78,47 @@ class PolEnergiaClient:
         return None
 
     async def get_agreements(self, customer_number: str) -> list[dict[str, Any]]:
+        if (cached := self._agreements_cache.get(customer_number)) is not None:
+            return cached
+
         response = await self._connector.get("Agreements", params={"customerNumber": customer_number})
         if isinstance(response, list):
-            return response
-        if isinstance(response, dict):
-            return response.get("results", response.get("data", []))
-        return []
+            agreements = response
+        elif isinstance(response, dict):
+            agreements = response.get("results", response.get("data", []))
+        else:
+            agreements = []
+
+        self._agreements_cache[customer_number] = agreements
+        return agreements
+
+    async def get_tariff_by_agreement(self, customer_number: str) -> dict[str, str]:
+        """Map agreement id -> tariff code (e.g. ``{"62714": "G11"}``).
+
+        The MeasurementPoints payload carries no tariff at all; the only place it
+        appears is Agreements, under ``parameters[type == "Tariff"]``.
+        """
+        tariffs: dict[str, str] = {}
+        try:
+            agreements = await self.get_agreements(customer_number)
+        except Exception as err:  # noqa: BLE001 - tariff is optional metadata
+            _LOGGER.warning("Could not fetch agreements for tariff detection: %s", err)
+            return tariffs
+
+        for agreement in agreements:
+            if not isinstance(agreement, dict):
+                continue
+            agreement_id = agreement.get("agreementId")
+            parameters = agreement.get("parameters")
+            if agreement_id is None or not isinstance(parameters, list):
+                continue
+            for parameter in parameters:
+                if not isinstance(parameter, dict):
+                    continue
+                if str(parameter.get("type", "")).lower() == "tariff" and parameter.get("value"):
+                    tariffs[str(agreement_id)] = str(parameter["value"])
+                    break
+        return tariffs
 
     async def get_earliest_agreement_date(self, customer_number: str) -> datetime | None:
         try:
@@ -119,24 +170,51 @@ class PolEnergiaClient:
 
         response = await self._connector.get("MeasurementPoints/readings", params=params)
 
+        envelope: dict[str, Any] | None = None
         if isinstance(response, list):
             readings_data = response
         elif isinstance(response, dict):
-            readings_data = response.get("readings", response.get("data", []))
+            envelope = response
+            readings_data = response.get(
+                "readings", response.get("results", response.get("data", []))
+            )
         else:
             raise PolEnergiaAPIError(f"Unexpected response format: {type(response)}")
 
-        readings: list[EnergyReading] = []
-        for r in readings_data:
-            try:
-                readings.append(EnergyReading.from_api_response(r))
-            except ValueError as err:
-                _LOGGER.warning("Skipping unparseable reading: %s", err)
-        return readings
+        readings, unknown_fields = parse_readings(readings_data, envelope)
+
+        self.last_unknown_reading_fields = unknown_fields
+        self.last_envelope_keys = sorted(envelope) if envelope else []
+        self.last_reading_sample = [row for row in readings_data[:3] if isinstance(row, dict)]
+        if unknown_fields:
+            _LOGGER.debug(
+                "Unrecognised fields in readings payload: %s", sorted(unknown_fields)
+            )
+
+        if not self._logged_export and any(r.direction == DIRECTION_EXPORT for r in readings):
+            self._logged_export = True
+            _LOGGER.info(
+                "Export (feed-in) readings detected — they are kept out of the "
+                "consumption statistics and written to a separate return stream"
+            )
+
+        # External statistics are keyed by start time; collapse rows that share a
+        # (meter, period, zone, direction) key so no duplicate points are written.
+        return aggregate_readings(readings)
 
     async def get_all_data(self, customer_number: str) -> PolEnergiaData:
         """Get all current data for the account."""
+        # One /Agreements round-trip per refresh, shared with the tariff lookup
+        # and get_earliest_agreement_date.
+        self._agreements_cache.pop(customer_number, None)
+
         measurement_points = await self.get_measurement_points(customer_number)
+
+        tariffs = await self.get_tariff_by_agreement(customer_number)
+        if tariffs:
+            sole_tariff = next(iter(tariffs.values())) if len(tariffs) == 1 else None
+            for mp in measurement_points:
+                mp.tariff = tariffs.get(mp.agreement_id or "") or sole_tariff or mp.tariff
 
         # Fetch last 13 months to cover current + previous year
         to_date = _next_day_utc()
@@ -162,6 +240,7 @@ class PolEnergiaClient:
             readings=all_readings,
             account_name=account_name,
             last_update=datetime.now(tz=UTC),
+            tariffs=tariffs,
         )
 
     @property

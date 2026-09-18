@@ -52,9 +52,12 @@
       },
       "set_price": {
         "title": "Set Energy Price",
-        "description": "Price per kWh in PLN, used to calculate monthly cost statistics for the Energy Dashboard.",
+        "description": "Price per kWh in PLN, used to calculate monthly cost statistics for the Energy Dashboard.\n\nDetected tariff zones: {zones}\n\nIf your meter reports tariff zones, one price field per zone is shown. Use the zone override only if your tariff group was not detected correctly.",
         "data": {
-          "import_price": "Import price (PLN/kWh)"
+          "import_price": "Import price (PLN/kWh)",
+          "import_price_z2": "Import price — night zone (PLN/kWh)",
+          "import_price_z3": "Import price — off-peak zone (PLN/kWh)",
+          "zone_count": "Tariff zones (auto = detect from tariff group)"
         }
       },
       "scan_interval": {

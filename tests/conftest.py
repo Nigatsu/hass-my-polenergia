@@ -49,7 +49,12 @@ def make_measurement_point(
 
 
 def make_reading(
-    year: int, month: int, value: float, mp_id: str | None = None
+    year: int,
+    month: int,
+    value: float,
+    mp_id: str | None = None,
+    zone: str | None = None,
+    direction: str = "import",
 ) -> EnergyReading:
     """Build a monthly reading anchored at the last instant of the month (UTC)."""
     # Anchor near end of month; exact day is irrelevant to the import logic.
@@ -59,6 +64,8 @@ def make_reading(
         value=value,
         unit="kWh",
         measurement_point_id=mp_id,
+        zone=zone,
+        direction=direction,
     )
 
 

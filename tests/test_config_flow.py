@@ -1,5 +1,7 @@
 """Config and options flow tests."""
 
+from types import SimpleNamespace
+
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -178,3 +180,63 @@ async def test_options_scan_interval(
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert mock_config_entry.options[CONF_SCAN_INTERVAL] == 3600
+
+
+async def test_options_set_price_single_zone_form(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """A G11 account still sees exactly one price field (plus the zone override)."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "set_price"}
+    )
+
+    keys = {str(marker) for marker in result["data_schema"].schema}
+    assert CONF_IMPORT_PRICE in keys
+    assert "import_price_z2" not in keys
+
+
+async def test_options_set_price_zoned_form(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """When readings carried zones, one price field per zone is rendered."""
+    mock_config_entry.add_to_hass(hass)
+    # The options flow reads the zones the coordinator actually saw, so that the
+    # form needs no live API call.
+    mock_config_entry.runtime_data = SimpleNamespace(
+        zones_seen={"mp1": ["z1", "z2"]}, data=None
+    )
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "set_price"}
+    )
+
+    keys = {str(marker) for marker in result["data_schema"].schema}
+    # Zone 1 reuses the existing key so a single-rate setting carries over.
+    assert CONF_IMPORT_PRICE in keys
+    assert "import_price_z2" in keys
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_IMPORT_PRICE: 1.10, "import_price_z2": 0.55}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert mock_config_entry.options["import_price_z2"] == 0.55
+
+
+async def test_options_set_price_zone_override(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """The manual zone override renders zone fields even with no detected zones."""
+    mock_config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_config_entry, options={"zone_count": "3"})
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "set_price"}
+    )
+
+    keys = {str(marker) for marker in result["data_schema"].schema}
+    assert {"import_price_z2", "import_price_z3"} <= keys
