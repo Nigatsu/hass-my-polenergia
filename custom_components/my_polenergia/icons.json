@@ -1,0 +1,20 @@
+{
+  "entity": {
+    "sensor": {
+      "last_month_consumption": {
+        "default": "mdi:counter"
+      },
+      "import_price": {
+        "default": "mdi:currency-eur"
+      }
+    }
+  },
+  "services": {
+    "reload_statistics": {
+      "service": "mdi:database-refresh"
+    },
+    "clear_statistics": {
+      "service": "mdi:database-remove"
+    }
+  }
+}
