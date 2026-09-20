@@ -89,7 +89,7 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
 
         if not password:
             raise ConfigEntryAuthFailed(
-                "No password available. Please reconfigure the integration."
+                translation_domain=DOMAIN, translation_key="no_password"
             )
 
         try:
@@ -97,15 +97,19 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
             authenticated = await self.client.authenticate(username, password)
             if not authenticated:
                 raise ConfigEntryAuthFailed(
-                    "Authentication failed. Please check your credentials."
+                    translation_domain=DOMAIN, translation_key="invalid_auth"
                 )
             _LOGGER.info("Authenticated %s", username)
         except PolEnergiaAuthorizationError as err:
             raise ConfigEntryAuthFailed(
-                "Authentication failed. Please check your credentials."
+                translation_domain=DOMAIN, translation_key="invalid_auth"
             ) from err
         except PolEnergiaConnectionError as err:
-            raise UpdateFailed(f"Connection failed: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="cannot_connect",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def _async_update_data(self) -> dict[str, PolEnergiaData]:
         """Fetch data from API endpoint and refresh recorder statistics."""
@@ -114,12 +118,24 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
         except PolEnergiaAuthorizationError as err:
             data = await self._refetch_after_reauth(err)
         except PolEnergiaConnectionError as err:
-            raise UpdateFailed(f"Connection failed: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="cannot_connect",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except PolEnergiaAPIError as err:
-            raise UpdateFailed(f"API error: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except Exception as err:
             _LOGGER.exception("Unexpected error fetching data")
-            raise UpdateFailed(f"Unexpected error: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="unknown_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
         # Statistics import must never break the data refresh — sensors still
         # update even if the recorder write fails.
@@ -137,7 +153,13 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
         re-login fails on credentials, surface a reauth flow rather than failing
         forever.
         """
-        _LOGGER.warning("Token expired during data fetch — attempting re-authentication")
+        # Expected on virtually every scheduled refresh: the OAuth scope has no
+        # offline_access, so there is no refresh token and the short-lived access
+        # token is always stale by the time the next poll runs.
+        _LOGGER.debug(
+            "Access token expired during data fetch (expected — no offline_access "
+            "scope is granted); re-authenticating"
+        )
 
         username = self.config_entry.data[CONF_USERNAME]
         password = self.config_entry.data[CONF_PASSWORD]
@@ -145,21 +167,39 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
         try:
             authenticated = await self.client.authenticate(username, password)
         except PolEnergiaAuthorizationError as reauth_err:
-            raise ConfigEntryAuthFailed("Re-authentication failed") from reauth_err
+            _LOGGER.warning("Re-authentication failed for %s", username)
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="reauth_failed"
+            ) from reauth_err
         except PolEnergiaConnectionError as conn_err:
-            raise UpdateFailed(f"Connection failed during re-auth: {conn_err}") from conn_err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="cannot_connect",
+                translation_placeholders={"error": str(conn_err)},
+            ) from conn_err
 
         if not authenticated:
-            raise ConfigEntryAuthFailed("Re-authentication failed") from original_err
+            _LOGGER.warning("Re-authentication failed for %s", username)
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="reauth_failed"
+            ) from original_err
 
-        _LOGGER.info("Re-authenticated successfully")
+        _LOGGER.debug("Re-authenticated successfully")
 
         try:
             return await self.client.get_all_data(customer_number=self.customer_number)
         except PolEnergiaConnectionError as conn_err:
-            raise UpdateFailed(f"Connection failed: {conn_err}") from conn_err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="cannot_connect",
+                translation_placeholders={"error": str(conn_err)},
+            ) from conn_err
         except PolEnergiaAPIError as api_err:
-            raise UpdateFailed(f"API error: {api_err}") from api_err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="api_error",
+                translation_placeholders={"error": str(api_err)},
+            ) from api_err
 
     # ------------------------------------------------------------------ #
     # Statistics import (Energy Dashboard)                               #

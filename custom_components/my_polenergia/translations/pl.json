@@ -22,6 +22,13 @@
         "data": {
           "password": "Hasło"
         }
+      },
+      "reconfigure": {
+        "title": "Zmiana hasła Polenergia",
+        "description": "Podaj aktualne hasło do konta: {username}",
+        "data": {
+          "password": "Hasło"
+        }
       }
     },
     "error": {
@@ -34,7 +41,8 @@
     "abort": {
       "already_configured": "To konto jest już skonfigurowane",
       "no_customer_numbers": "Nie znaleziono numerów klientów",
-      "reauth_successful": "Ponowne uwierzytelnienie zakończone sukcesem"
+      "reauth_successful": "Ponowne uwierzytelnienie zakończone sukcesem",
+      "reconfigure_successful": "Hasło zostało zaktualizowane"
     }
   },
   "options": {
@@ -46,8 +54,7 @@
           "set_price": "Ustaw cenę energii",
           "scan_interval": "Interwał aktualizacji",
           "reload_history": "Przeładuj dane historyczne",
-          "clear_stats": "Wyczyść statystyki",
-          "change_credentials": "Zmień dane logowania"
+          "clear_stats": "Wyczyść statystyki"
         }
       },
       "set_price": {
@@ -80,20 +87,10 @@
         "data": {
           "confirm": "Tak, usuń wszystkie moje statystyki Polenergia"
         }
-      },
-      "change_credentials": {
-        "title": "Zmień dane logowania",
-        "description": "Zaktualizuj hasło dla {username}.",
-        "data": {
-          "password": "Hasło"
-        }
       }
     },
     "error": {
-      "invalid_auth": "Nieprawidłowe dane logowania",
-      "cannot_connect": "Nie można połączyć się z API Polenergia",
-      "invalid_date": "Nieprawidłowa data — użyj formatu ISO YYYY-MM-DD",
-      "unknown": "Wystąpił nieoczekiwany błąd"
+      "invalid_date": "Nieprawidłowa data — użyj formatu ISO YYYY-MM-DD"
     }
   },
   "entity": {
@@ -120,6 +117,35 @@
     "clear_statistics": {
       "name": "Wyczyść statystyki",
       "description": "Usuwa wszystkie statystyki energii i kosztów utworzone przez tę integrację."
+    }
+  },
+  "exceptions": {
+    "invalid_auth": {
+      "message": "Uwierzytelnianie nie powiodło się. Sprawdź dane logowania do Polenergii."
+    },
+    "no_password": {
+      "message": "Brak zapisanego hasła dla tego konta. Skonfiguruj integrację ponownie."
+    },
+    "reauth_failed": {
+      "message": "Nie udało się ponownie zalogować do Polenergii. Sprawdź dane logowania."
+    },
+    "cannot_connect": {
+      "message": "Nie można połączyć się z API Polenergii: {error}"
+    },
+    "api_error": {
+      "message": "API Polenergii zwróciło błąd: {error}"
+    },
+    "unknown_error": {
+      "message": "Nieoczekiwany błąd komunikacji z Polenergią: {error}"
+    },
+    "invalid_from_date": {
+      "message": "„{from_date}” nie jest prawidłową datą ISO. Użyj formatu RRRR-MM-DD."
+    },
+    "reload_failed": {
+      "message": "Nie udało się przeładować statystyk dla {title}: {error}"
+    },
+    "no_statistics_to_clear": {
+      "message": "Nie znaleziono żadnych statystyk Polenergii do usunięcia."
     }
   }
 }

@@ -22,6 +22,13 @@
         "data": {
           "password": "Password"
         }
+      },
+      "reconfigure": {
+        "title": "Update Polenergia Password",
+        "description": "Enter the current password for account: {username}",
+        "data": {
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -34,7 +41,8 @@
     "abort": {
       "already_configured": "This account is already configured",
       "no_customer_numbers": "No customer numbers found",
-      "reauth_successful": "Re-authentication successful"
+      "reauth_successful": "Re-authentication successful",
+      "reconfigure_successful": "Password updated"
     }
   },
   "options": {
@@ -46,8 +54,7 @@
           "set_price": "Set Energy Price",
           "scan_interval": "Update Interval",
           "reload_history": "Reload Historical Statistics",
-          "clear_stats": "Clear Statistics",
-          "change_credentials": "Change Credentials"
+          "clear_stats": "Clear Statistics"
         }
       },
       "set_price": {
@@ -80,20 +87,10 @@
         "data": {
           "confirm": "Yes, clear all my Polenergia statistics"
         }
-      },
-      "change_credentials": {
-        "title": "Change Credentials",
-        "description": "Update the password for {username}.",
-        "data": {
-          "password": "Password"
-        }
       }
     },
     "error": {
-      "invalid_auth": "Invalid authentication credentials",
-      "cannot_connect": "Unable to connect to Polenergia API",
-      "invalid_date": "Invalid date — use ISO format YYYY-MM-DD",
-      "unknown": "Unexpected error occurred"
+      "invalid_date": "Invalid date — use ISO format YYYY-MM-DD"
     }
   },
   "entity": {
@@ -120,6 +117,35 @@
     "clear_statistics": {
       "name": "Clear statistics",
       "description": "Remove all energy and cost statistics created by this integration."
+    }
+  },
+  "exceptions": {
+    "invalid_auth": {
+      "message": "Authentication failed. Please check your Polenergia credentials."
+    },
+    "no_password": {
+      "message": "No password is stored for this account. Please reconfigure the integration."
+    },
+    "reauth_failed": {
+      "message": "Could not re-authenticate with Polenergia. Please check your credentials."
+    },
+    "cannot_connect": {
+      "message": "Could not reach the Polenergia API: {error}"
+    },
+    "api_error": {
+      "message": "The Polenergia API returned an error: {error}"
+    },
+    "unknown_error": {
+      "message": "Unexpected error talking to Polenergia: {error}"
+    },
+    "invalid_from_date": {
+      "message": "{from_date} is not a valid ISO date. Use YYYY-MM-DD."
+    },
+    "reload_failed": {
+      "message": "Could not reload statistics for {title}: {error}"
+    },
+    "no_statistics_to_clear": {
+      "message": "No Polenergia statistics were found to clear."
     }
   }
 }

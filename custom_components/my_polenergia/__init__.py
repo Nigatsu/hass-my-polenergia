@@ -3,12 +3,14 @@
 from datetime import UTC, datetime, timedelta
 import logging
 
+from homeassistant.components.recorder import get_instance
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 import voluptuous as vol
 
@@ -101,16 +103,8 @@ def _register_services(hass: HomeAssistant) -> None:
     """Register the reload/clear statistics services."""
 
     async def handle_reload_statistics(call: ServiceCall) -> None:
-        from_date_str = call.data.get(CONF_FROM_DATE)
-        from_date: datetime | None = None
-        if from_date_str:
-            try:
-                from_date = datetime.fromisoformat(from_date_str)
-            except ValueError as err:
-                _LOGGER.error("Invalid from_date format: %s — %s", from_date_str, err)
-                return
-            if from_date.tzinfo is None:
-                from_date = from_date.replace(tzinfo=UTC)
+        """Rebuild the statistics streams of every loaded entry."""
+        from_date = _parse_from_date(call.data.get(CONF_FROM_DATE))
 
         for entry in _loaded_entries(hass):
             coord = entry.runtime_data
@@ -120,11 +114,16 @@ def _register_services(hass: HomeAssistant) -> None:
                 await coord.import_statistics(
                     coord.data["data"], from_date=from_date, full_rebuild=True
                 )
-                _LOGGER.info("Reloaded statistics for %s", entry.title)
             except Exception as err:
-                _LOGGER.error("Failed to reload statistics for %s: %s", entry.title, err)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="reload_failed",
+                    translation_placeholders={"title": entry.title, "error": str(err)},
+                ) from err
+            _LOGGER.info("Reloaded statistics for %s", entry.title)
 
     async def handle_clear_statistics(call: ServiceCall) -> None:
+        """Remove every statistics stream this integration has written."""
         statistic_ids: list[str] = []
         for entry in _loaded_entries(hass):
             coord = entry.runtime_data
@@ -141,15 +140,16 @@ def _register_services(hass: HomeAssistant) -> None:
             if reg_entry.unique_id.endswith(_LEGACY_STAT_SUFFIXES):
                 statistic_ids.append(reg_entry.entity_id)
 
-        if statistic_ids:
-            from homeassistant.components.recorder import get_instance
-            get_instance(hass).async_clear_statistics(statistic_ids)
-            _LOGGER.info(
-                "Cleared %d statistic streams — call reload_statistics to re-import",
-                len(statistic_ids),
+        if not statistic_ids:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="no_statistics_to_clear"
             )
-        else:
-            _LOGGER.warning("clear_statistics called but no matching streams found")
+
+        get_instance(hass).async_clear_statistics(statistic_ids)
+        _LOGGER.info(
+            "Cleared %d statistic streams — call reload_statistics to re-import",
+            len(statistic_ids),
+        )
 
     hass.services.async_register(
         DOMAIN, SERVICE_RELOAD_STATISTICS, handle_reload_statistics, schema=RELOAD_STATISTICS_SCHEMA
@@ -157,6 +157,23 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_STATISTICS, handle_clear_statistics, schema=CLEAR_STATISTICS_SCHEMA
     )
+
+
+def _parse_from_date(from_date_str: str | None) -> datetime | None:
+    """Parse the optional ISO ``from_date`` service field."""
+    if not from_date_str:
+        return None
+    try:
+        from_date = datetime.fromisoformat(from_date_str)
+    except ValueError as err:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_from_date",
+            translation_placeholders={"from_date": from_date_str},
+        ) from err
+    if from_date.tzinfo is None:
+        from_date = from_date.replace(tzinfo=UTC)
+    return from_date
 
 
 def _loaded_entries(hass: HomeAssistant) -> list[PolEnergiaConfigEntry]:
