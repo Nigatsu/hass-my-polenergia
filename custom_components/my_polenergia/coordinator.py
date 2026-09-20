@@ -19,15 +19,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from ..const import CONF_IMPORT_PRICE, CURRENCY_PLN, DEFAULT_IMPORT_PRICE, DOMAIN
-from ..polenergia.client import PolEnergiaClient
-from ..polenergia.data import EnergyReading, MeasurementPoint, PolEnergiaData
-from ..polenergia.errors import (
+from .const import CONF_IMPORT_PRICE, CURRENCY_PLN, DEFAULT_IMPORT_PRICE, DOMAIN
+from .polenergia.client import PolEnergiaClient
+from .polenergia.data import EnergyReading, MeasurementPoint, PolEnergiaData
+from .polenergia.errors import (
     PolEnergiaAPIError,
     PolEnergiaAuthorizationError,
     PolEnergiaConnectionError,
 )
-from ..polenergia.tariffs import (
+from .polenergia.tariffs import (
     DIRECTION_EXPORT,
     DIRECTION_IMPORT,
     zone_count,
@@ -36,6 +36,8 @@ from ..polenergia.tariffs import (
 
 _LOGGER = logging.getLogger(__name__)
 
+type PolEnergiaConfigEntry = ConfigEntry[PolEnergiaDataUpdateCoordinator]
+
 # When resuming, re-fetch a little over two months so a freshly published month
 # (and any late correction to the previous one) is always covered.
 _RESUME_LOOKBACK = timedelta(days=95)
@@ -43,8 +45,12 @@ _RESUME_LOOKBACK = timedelta(days=95)
 _FALLBACK_HISTORY = timedelta(days=730)
 
 
-class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
+class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergiaData]]):
     """Class to manage fetching PolEnergia data from the API."""
+
+    # Narrower than the base class's optional entry: this coordinator is only
+    # ever built from an entry, and every helper below relies on it.
+    config_entry: "PolEnergiaConfigEntry"
 
     def __init__(
         self,
@@ -53,7 +59,8 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         customer_number: str,
         update_interval: timedelta,
         config_entry: ConfigEntry,
-    ):
+    ) -> None:
+        """Set up the coordinator for one Polenergia customer account."""
         self.client = client
         self.customer_number = customer_number
         # Zone slugs actually seen in readings, per measurement point id. Read by
@@ -100,7 +107,7 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         except PolEnergiaConnectionError as err:
             raise UpdateFailed(f"Connection failed: {err}") from err
 
-    async def _async_update_data(self) -> dict:
+    async def _async_update_data(self) -> dict[str, PolEnergiaData]:
         """Fetch data from API endpoint and refresh recorder statistics."""
         try:
             data = await self.client.get_all_data(customer_number=self.customer_number)
@@ -186,7 +193,7 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         )
         if rows and rows.get(statistic_id):
             row = rows[statistic_id][0]
-            return float(row["sum"]), float(row["start"])
+            return float(row["sum"] or 0.0), float(row["start"])
         return None
 
     async def import_statistics(
@@ -430,6 +437,8 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
         stats: list[StatisticData],
     ) -> None:
         """Write one external statistics stream (energy or cost)."""
+        unit: str
+        unit_class: str | None
         if kind == "energy":
             unit = UnitOfEnergy.KILO_WATT_HOUR
             unit_class = "energy"
@@ -443,7 +452,6 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator):
             name=name,
             unit_of_measurement=unit,
             unit_class=unit_class,
-            has_mean=False,
             has_sum=True,
             mean_type=StatisticMeanType.NONE,
         )

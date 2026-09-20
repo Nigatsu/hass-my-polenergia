@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 import logging
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_registry as er
@@ -18,14 +18,12 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
-from .hass_integration.coordinator import PolEnergiaDataUpdateCoordinator
+from .coordinator import PolEnergiaConfigEntry, PolEnergiaDataUpdateCoordinator
 from .polenergia.client import PolEnergiaClient
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
-
-type PolEnergiaConfigEntry = ConfigEntry[PolEnergiaDataUpdateCoordinator]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 

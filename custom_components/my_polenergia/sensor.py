@@ -26,7 +26,7 @@ from .const import (
     DEFAULT_IMPORT_PRICE,
     DOMAIN,
 )
-from .hass_integration.coordinator import PolEnergiaDataUpdateCoordinator
+from .coordinator import PolEnergiaDataUpdateCoordinator
 from .polenergia.data import MeasurementPoint
 from .polenergia.tariffs import zone_count
 
