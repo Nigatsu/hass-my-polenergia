@@ -74,7 +74,7 @@ def make_data(
     readings: dict[str, list[EnergyReading]] | None = None,
 ) -> PolEnergiaData:
     """Build a PolEnergiaData container."""
-    mps = measurement_points or [make_measurement_point()]
+    mps = [make_measurement_point()] if measurement_points is None else measurement_points
     return PolEnergiaData(
         customer_number=CUSTOMER_NUMBER,
         measurement_points=mps,

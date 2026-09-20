@@ -1,9 +1,10 @@
 """OAuth2 connector for PolEnergia API."""
 
 import base64
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import hashlib
 import logging
+import re
 import secrets
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -50,19 +51,23 @@ class PolEnergiaConnector:
         self._code_verifier: str | None = None
         self._code_challenge: str | None = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "PolEnergiaConnector":
+        """Open an owned session if one is needed."""
         await self._ensure_session()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Close the session if this connector owns it."""
         await self.close()
 
-    async def _ensure_session(self):
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        """The session to use, creating an owned one if none was injected."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(headers={"User-Agent": USER_AGENT})
             self._owns_session = True
+        return self._session
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the session and clear token state.
 
         Only an owned (self-created) session is actually closed; an injected
@@ -81,7 +86,6 @@ class PolEnergiaConnector:
         return code_verifier, code_challenge
 
     def _extract_csrf_token(self, html: str) -> str | None:
-        import re
         patterns = [
             r'name="__RequestVerificationToken"[^>]*value="([^"]+)"',
             r'value="([^"]+)"[^>]*name="__RequestVerificationToken"',
@@ -93,8 +97,15 @@ class PolEnergiaConnector:
         return None
 
     async def authenticate(self, username: str, password: str) -> bool:
-        """Authenticate with PolEnergia using OAuth2 PKCE flow."""
-        await self._ensure_session()
+        """Authenticate with PolEnergia using the OAuth2 PKCE flow.
+
+        Only ``SCOPE`` is requested. Asking additionally for ``offline_access``
+        was tested against the live server on 2026-09-19 and is refused — the
+        authorize step simply never returns a ``code`` — so there is no refresh
+        token and every poll performs a full login. See CLAUDE.md section 4;
+        ``dev/check_offline_access.py`` re-runs the check.
+        """
+        session = await self._ensure_session()
 
         try:
             self._code_verifier, self._code_challenge = self._generate_pkce_pair()
@@ -113,7 +124,7 @@ class PolEnergiaConnector:
             return_url = f"/connect/authorize/callback?{urlencode(auth_params)}"
 
             # Load login page to get CSRF token
-            async with self._session.get(
+            async with session.get(
                 AUTH_LOGIN_URL,
                 params={"ReturnUrl": return_url},
                 headers={"User-Agent": USER_AGENT},
@@ -135,7 +146,7 @@ class PolEnergiaConnector:
             if csrf_token:
                 login_data["__RequestVerificationToken"] = csrf_token
 
-            async with self._session.post(
+            async with session.post(
                 AUTH_LOGIN_URL,
                 data=login_data,
                 allow_redirects=True,
@@ -151,7 +162,7 @@ class PolEnergiaConnector:
                     returned_state = query_params.get("state", [None])[0]
                     if returned_state != state:
                         raise PolEnergiaAuthorizationError("State parameter mismatch (CSRF protection)")
-                    return await self._exchange_code_for_token(auth_code)
+                    return await self._exchange_code_for_token(session, auth_code)
 
                 error = query_params.get("error", [None])[0]
                 if error:
@@ -165,7 +176,9 @@ class PolEnergiaConnector:
         except Exception as err:
             raise PolEnergiaAuthorizationError(f"Authentication failed: {err}") from err
 
-    async def _exchange_code_for_token(self, auth_code: str) -> bool:
+    async def _exchange_code_for_token(
+        self, session: aiohttp.ClientSession, auth_code: str
+    ) -> bool:
         token_data = {
             "client_id": CLIENT_ID,
             "code": auth_code,
@@ -175,7 +188,7 @@ class PolEnergiaConnector:
         }
 
         try:
-            async with self._session.post(
+            async with session.post(
                 AUTH_TOKEN_URL,
                 data=token_data,
                 headers={
@@ -196,7 +209,7 @@ class PolEnergiaConnector:
                     raise PolEnergiaAuthorizationError("No access token received")
 
                 expires_in = token_response.get("expires_in", 1800)
-                self._token_expiry = datetime.now() + timedelta(seconds=expires_in)
+                self._token_expiry = datetime.now(tz=UTC) + timedelta(seconds=expires_in)
 
                 _LOGGER.info("Authenticated successfully (token expires in %ds)", expires_in)
                 return True
@@ -207,15 +220,20 @@ class PolEnergiaConnector:
     def _is_token_expired(self) -> bool:
         if not self._token_expiry:
             return True
-        return datetime.now() >= self._token_expiry - timedelta(minutes=5)
+        return datetime.now(tz=UTC) >= self._token_expiry - timedelta(minutes=5)
 
-    async def _ensure_valid_token(self):
+    async def _ensure_valid_token(self) -> None:
+        """Guarantee a usable access token, or hand the caller back to re-login."""
         if not self._access_token or self._is_token_expired():
             raise PolEnergiaAuthorizationError("Access token expired or missing")
 
-    async def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Make authenticated GET request to API."""
-        await self._ensure_session()
+    async def get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
+        """Make authenticated GET request to API.
+
+        The return type is the decoded JSON body, which Polenergia serves as
+        either a bare array or an envelope object depending on the endpoint.
+        """
+        session = await self._ensure_session()
         await self._ensure_valid_token()
 
         url = f"{API_BASE_URL}/{endpoint.lstrip('/')}"
@@ -225,7 +243,7 @@ class PolEnergiaConnector:
         }
 
         try:
-            async with self._session.get(
+            async with session.get(
                 url, params=params, headers=headers, timeout=_REQUEST_TIMEOUT
             ) as response:
                 if response.status == 401:
@@ -243,4 +261,5 @@ class PolEnergiaConnector:
 
     @property
     def is_authenticated(self) -> bool:
+        """Whether a usable access token is held right now."""
         return self._access_token is not None and not self._is_token_expired()

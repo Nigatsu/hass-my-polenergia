@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 import pytest
 
 from custom_components.my_polenergia.const import DOMAIN
-from custom_components.my_polenergia.hass_integration.coordinator import (
+from custom_components.my_polenergia.coordinator import (
     PolEnergiaDataUpdateCoordinator,
 )
 
@@ -19,7 +19,7 @@ from .conftest import (
 )
 
 _ADD_STATS = (
-    "custom_components.my_polenergia.hass_integration.coordinator"
+    "custom_components.my_polenergia.coordinator"
     ".async_add_external_statistics"
 )
 

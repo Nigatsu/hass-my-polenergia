@@ -18,7 +18,7 @@ from .tariffs import (
 _LOGGER = logging.getLogger(__name__)
 
 # Polenergia is Polish; bare timestamps without offset = Warsaw wall-clock.
-_POLENERGIA_TZ = ZoneInfo("Europe/Warsaw")
+POLENERGIA_TZ = ZoneInfo("Europe/Warsaw")
 
 # Keys a reading row may use for its timestamp / value / owning meter.
 _TIMESTAMP_KEYS = ("date", "timestamp", "readingDate")
@@ -158,7 +158,7 @@ class EnergyReading:
     @property
     def period_anchor(self) -> datetime:
         """Polenergia anchors monthly readings at last day of the month (timezone-aware)."""
-        return self.timestamp if self.timestamp.tzinfo else self.timestamp.replace(tzinfo=_POLENERGIA_TZ)
+        return self.timestamp if self.timestamp.tzinfo else self.timestamp.replace(tzinfo=POLENERGIA_TZ)
 
 
 def _parse_timestamp(data: dict[str, Any]) -> datetime:
@@ -182,7 +182,7 @@ def _parse_timestamp(data: dict[str, Any]) -> datetime:
         timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
 
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=_POLENERGIA_TZ)
+        timestamp = timestamp.replace(tzinfo=POLENERGIA_TZ)
     return timestamp
 
 

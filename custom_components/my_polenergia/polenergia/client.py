@@ -8,6 +8,7 @@ import aiohttp
 
 from .connector import PolEnergiaConnector
 from .data import (
+    POLENERGIA_TZ,
     EnergyReading,
     MeasurementPoint,
     PolEnergiaData,
@@ -29,7 +30,8 @@ def _next_day_utc() -> datetime:
 class PolEnergiaClient:
     """High-level client for PolEnergia API."""
 
-    def __init__(self, session: aiohttp.ClientSession | None = None):
+    def __init__(self, session: aiohttp.ClientSession | None = None) -> None:
+        """Build a client over an optional caller-managed session."""
         self._connector = PolEnergiaConnector(session=session)
         # Memo so one refresh hits /Agreements once for both the tariff map and
         # the earliest agreement date. Reset at the start of get_all_data.
@@ -45,17 +47,20 @@ class PolEnergiaClient:
     def connector(self) -> PolEnergiaConnector:
         return self._connector
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "PolEnergiaClient":
+        """Open the underlying connector."""
         await self._connector.__aenter__()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Close the underlying connector."""
         await self._connector.__aexit__(exc_type, exc_val, exc_tb)
 
     async def authenticate(self, username: str, password: str) -> bool:
         return await self._connector.authenticate(username, password)
 
-    async def close(self):
+    async def close(self) -> None:
+        """Release the connector's resources."""
         await self._connector.close()
 
     async def get_customer_numbers(self) -> list[str]:
@@ -63,7 +68,8 @@ class PolEnergiaClient:
         if isinstance(response, list):
             return [str(n) for n in response]
         if isinstance(response, dict):
-            return [str(n) for n in response.get("customerNumbers", response.get("data", []))]
+            numbers = response.get("customerNumbers", response.get("data", [])) or []
+            return [str(n) for n in numbers]
         raise PolEnergiaAPIError(f"Unexpected response format: {type(response)}")
 
     async def get_account_name(self, customer_number: str) -> str | None:
@@ -85,7 +91,7 @@ class PolEnergiaClient:
         if isinstance(response, list):
             agreements = response
         elif isinstance(response, dict):
-            agreements = response.get("results", response.get("data", []))
+            agreements = response.get("results", response.get("data", [])) or []
         else:
             agreements = []
 
@@ -128,9 +134,14 @@ class PolEnergiaClient:
                 date_str = agreement.get("dateFrom")
                 if date_str:
                     try:
-                        dates.append(datetime.fromisoformat(date_str.replace("Z", "+00:00")))
-                    except (ValueError, TypeError):
-                        pass
+                        parsed = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+                    # API timestamps are naive local time; everything downstream
+                    # is UTC-aware, so never let the two mix.
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=POLENERGIA_TZ)
+                    dates.append(parsed.astimezone(UTC))
             return min(dates) if dates else None
         except Exception as err:
             _LOGGER.error("Failed to get earliest agreement date: %s", err)
@@ -143,7 +154,7 @@ class PolEnergiaClient:
         if isinstance(response, list):
             data = response
         elif isinstance(response, dict):
-            data = response.get("results", response.get("data", []))
+            data = response.get("results", response.get("data", [])) or []
         else:
             raise PolEnergiaAPIError(f"Unexpected response format: {type(response)}")
 
@@ -175,8 +186,9 @@ class PolEnergiaClient:
             readings_data = response
         elif isinstance(response, dict):
             envelope = response
-            readings_data = response.get(
-                "readings", response.get("results", response.get("data", []))
+            readings_data = (
+                response.get("readings", response.get("results", response.get("data", [])))
+                or []
             )
         else:
             raise PolEnergiaAPIError(f"Unexpected response format: {type(response)}")
@@ -185,7 +197,9 @@ class PolEnergiaClient:
 
         self.last_unknown_reading_fields = unknown_fields
         self.last_envelope_keys = sorted(envelope) if envelope else []
-        self.last_reading_sample = [row for row in readings_data[:3] if isinstance(row, dict)]
+        self.last_reading_sample = [
+            row for row in (readings_data or [])[:3] if isinstance(row, dict)
+        ]
         if unknown_fields:
             _LOGGER.debug(
                 "Unrecognised fields in readings payload: %s", sorted(unknown_fields)
@@ -222,15 +236,28 @@ class PolEnergiaClient:
 
         readings_list = await self.get_readings(from_date=from_date, to_date=to_date)
 
-        # Group readings by measurementPointId from the API response
+        # Group readings by measurementPointId from the API response. An
+        # unmatched row is only attributable when the account has a single
+        # meter; on a multi-meter account, copying it everywhere would inflate
+        # every sensor. The statistics importer applies the same rule.
         all_readings: dict[str, list[EnergyReading]] = {mp.id: [] for mp in measurement_points}
+        single_meter = len(measurement_points) == 1
+        unmatched = 0
         for reading in readings_list:
             if reading.measurement_point_id and reading.measurement_point_id in all_readings:
                 all_readings[reading.measurement_point_id].append(reading)
+            elif single_meter:
+                all_readings[measurement_points[0].id].append(reading)
             else:
-                # Fallback: assign to all measurement points (single-meter accounts)
-                for mp_id in all_readings:
-                    all_readings[mp_id].append(reading)
+                unmatched += 1
+
+        if unmatched:
+            _LOGGER.warning(
+                "Discarded %d reading(s) with no matching measurement point on a "
+                "%d-meter account",
+                unmatched,
+                len(measurement_points),
+            )
 
         account_name = await self.get_account_name(customer_number)
 
@@ -245,4 +272,5 @@ class PolEnergiaClient:
 
     @property
     def is_authenticated(self) -> bool:
+        """Whether the connector holds a usable access token."""
         return self._connector.is_authenticated

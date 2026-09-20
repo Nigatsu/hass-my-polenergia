@@ -12,6 +12,9 @@ API_BASE_URL = "https://api.polenergia.pl/api/v1"
 # OAuth2 configuration
 CLIENT_ID = "mBok_web"
 REDIRECT_URI = "https://moja.polenergia.pl/authentication/callback"
+# Adding "offline_access" here does not work: tested against the live server on
+# 2026-09-19, the authorize step then returns no code at all. There is no
+# refresh token to be had. See CLAUDE.md section 4.
 SCOPE = "openid mbok_api"
 RESPONSE_TYPE = "code"
 

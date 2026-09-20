@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 import pytest
 
-from custom_components.my_polenergia.hass_integration.coordinator import (
+from custom_components.my_polenergia.coordinator import (
     PolEnergiaDataUpdateCoordinator,
 )
 from custom_components.my_polenergia.polenergia.errors import (
@@ -20,7 +20,7 @@ from .conftest import CUSTOMER_NUMBER, make_data
 
 # Patch target: keep the coordinator off the recorder during full setup.
 _IMPORT_STATS = (
-    "custom_components.my_polenergia.hass_integration.coordinator"
+    "custom_components.my_polenergia.coordinator"
     ".PolEnergiaDataUpdateCoordinator.import_statistics"
 )
 
