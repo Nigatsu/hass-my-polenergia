@@ -1,0 +1,83 @@
+# Integration Quality Scale self-assessment.
+#
+# Hassfest skips this file for custom integrations (it returns early when
+# `not integration.core`), so nothing here is machine-enforced. It is kept as a
+# self-check, and as a ready-made file should this integration ever move into
+# core.
+rules:
+  # -------------------------------------------------------------- Bronze
+  action-setup: done
+  appropriate-polling: done
+  brands:
+    status: exempt
+    comment: >-
+      Custom integration; the icon ships in-repo under brand/. A PR to
+      home-assistant/brands under custom_integrations/my_polenergia/ is still
+      open work, tracked in the README.
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency:
+    status: exempt
+    comment: >-
+      No third-party requirements. The API client is vendored under
+      polenergia/ and is readable in-tree.
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # -------------------------------------------------------------- Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: done
+
+  # ---------------------------------------------------------------- Gold
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: Cloud account behind a login; there is nothing on the network to discover.
+  discovery-update-info:
+    status: exempt
+    comment: No discovery, and no network-level information to update.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices: done
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default:
+    status: exempt
+    comment: >-
+      Two entities per meter, both cheap and useful; neither is noisy enough to
+      warrant being disabled by default.
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues: done
+  stale-devices: done
+
+  # ------------------------------------------------------------ Platinum
+  async-dependency: done
+  inject-websession: done
+  strict-typing: done

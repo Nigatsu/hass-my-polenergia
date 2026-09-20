@@ -1,5 +1,14 @@
 name: Test
 
+# Python support tracks Home Assistant, not this repo: the declared floor
+# (hacs.json -> 2026.1) runs on Python 3.13.2, while HA 2026.9+ requires 3.14.
+# So:
+#   pytest  - matrix over both ends of the supported range.
+#   ruff    - newest interpreter, but target-version = py313 in pyproject, so it
+#             never suggests syntax that would break a 3.13 user.
+#   mypy    - 3.13, matching pyproject's python_version. It parses Home
+#             Assistant's own source, and HA 2026.9+ is 3.14-only syntax that a
+#             3.13-configured mypy cannot read.
 on:
   push:
   pull_request:
@@ -9,20 +18,36 @@ jobs:
     name: Ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - run: pip install ruff
       - run: ruff check custom_components tests
 
   pytest:
-    name: Pytest
+    name: Pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 = oldest supported (HA 2026.1–2026.2); 3.14 = newest (HA 2026.9+).
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements_test.txt
+      - run: pytest tests --cov=custom_components/my_polenergia --cov-report=term-missing --cov-fail-under=95
+
+  mypy:
+    name: Mypy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.13"  # see header
       - run: pip install -r requirements_test.txt
-      - run: pytest tests --cov=custom_components/my_polenergia --cov-report=term-missing
+      - run: mypy custom_components/my_polenergia

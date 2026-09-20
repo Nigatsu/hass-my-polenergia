@@ -1,6 +1,12 @@
 # Test + lint dependencies. pytest-homeassistant-custom-component pulls a
 # matching Home Assistant and pytest stack; pin a floor and let CI resolve the
 # latest compatible release for the pinned Python.
-pytest-homeassistant-custom-component>=0.13.0
-pytest-cov
-ruff>=0.6.0
+#
+# Keep the p-h-c-c floor at the newest release that still installs on Python
+# 3.13 (the integration's floor, per hacs.json -> HA 2026.1). Raising it past
+# that breaks the 3.13 leg of the test matrix, because newer releases follow
+# HA 2026.9+ onto Python 3.14.
+pytest-homeassistant-custom-component>=0.13.316
+pytest-cov>=7.0
+ruff>=0.16
+mypy>=2.3

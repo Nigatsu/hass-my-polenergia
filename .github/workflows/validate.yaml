@@ -11,8 +11,8 @@ jobs:
     name: HACS
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hacs/action@main
+      - uses: actions/checkout@v7
+      - uses: hacs/action@22.5.0
         with:
           category: integration
 
@@ -20,5 +20,7 @@ jobs:
     name: Hassfest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # Home Assistant publishes hassfest only from master; the 1.0.0 tag ships
+      # an image that cannot import script.hassfest.
       - uses: home-assistant/actions/hassfest@master
