@@ -29,6 +29,7 @@ from .const import (
     ISSUE_IMPORT_PRICE_UNSET,
     ISSUE_NO_READINGS,
     import_price_key,
+    price_options,
 )
 from .polenergia.client import PolEnergiaClient
 from .polenergia.data import EnergyReading, MeasurementPoint, PolEnergiaData
@@ -78,6 +79,10 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
         # coordinator rather than written to the config entry, because calling
         # async_update_entry during a refresh causes a reload loop.
         self.zones_seen: dict[str, list[str]] = {}
+        # Prices the cost statistics currently in the recorder were computed
+        # with. Compared on an options update: cost is kWh x price, so a rate
+        # change only reaches the dashboard if the stored months are rebuilt.
+        self.imported_prices: dict[str, float] = price_options(config_entry.options)
 
         super().__init__(
             hass,

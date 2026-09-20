@@ -20,6 +20,7 @@ from .const import (
     CONF_CUSTOMER_NUMBER,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    price_options,
 )
 from .coordinator import PolEnergiaConfigEntry, PolEnergiaDataUpdateCoordinator
 from .polenergia.client import PolEnergiaClient
@@ -213,4 +214,26 @@ async def async_remove_config_entry_device(
 
 async def async_update_options(hass: HomeAssistant, entry: PolEnergiaConfigEntry) -> None:
     """Handle options update — reload entry so new scan_interval / price take effect."""
+    await _async_rebuild_cost_on_price_change(entry)
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def _async_rebuild_cost_on_price_change(entry: PolEnergiaConfigEntry) -> None:
+    """Recompute stored statistics when the user changed an import price.
+
+    Cost is ``kWh x price``, and the normal refresh only appends months newer
+    than the last imported one — so without this a rate change would leave every
+    stored month priced at the old rate, with nothing on screen to say why.
+    Energy values are identical after the rebuild; only cost moves.
+    """
+    coordinator = getattr(entry, "runtime_data", None)
+    if coordinator is None or not (coordinator.data and coordinator.data.get("data")):
+        return
+    if price_options(entry.options) == coordinator.imported_prices:
+        return
+    try:
+        await coordinator.import_statistics(coordinator.data["data"], full_rebuild=True)
+    except Exception:  # a failed rebuild must never break the options flow
+        _LOGGER.exception("Rebuilding cost statistics for %s failed", entry.title)
+    else:
+        _LOGGER.info("Rebuilt cost statistics for %s after a price change", entry.title)

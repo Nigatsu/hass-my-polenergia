@@ -1,7 +1,7 @@
 """Statistics import logic tests (coordinator.import_statistics)."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.core import HomeAssistant
 import pytest
@@ -254,3 +254,212 @@ async def test_no_zone_streams_for_single_zone_account(
         await coordinator.import_statistics(data, full_rebuild=True)
 
     assert set(_all_streams(add_stats)) == {f"{DOMAIN}:mp1_energy", f"{DOMAIN}:mp1_cost"}
+
+
+async def test_no_measurement_points_is_a_noop(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """An account with no meters writes nothing and does not query readings."""
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([]))
+
+    mock_client.get_readings.assert_not_awaited()
+    add_mock.assert_not_called()
+
+
+async def test_no_readings_writes_nothing(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """An empty readings window is not an error, just nothing to import."""
+    mock_client.get_readings.return_value = []
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=None)
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    add_mock.assert_not_called()
+
+
+async def test_meter_without_readings_is_skipped(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """On a multi-meter account, a meter with no rows gets no streams at all."""
+    mp1 = make_measurement_point("mp1", ppe="PL0001")
+    mp2 = make_measurement_point("mp2", ppe="PL0002")
+    mock_client.get_readings.return_value = [make_reading(2024, 1, 100.0, "mp1")]
+
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=None)
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([mp1, mp2]))
+
+    assert set(_all_streams(add_mock)) == {f"{DOMAIN}:mp1_energy", f"{DOMAIN}:mp1_cost"}
+
+
+async def test_nothing_new_writes_nothing(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """A resume with no newer month leaves the recorder untouched."""
+    mock_client.get_readings.return_value = [make_reading(2024, 1, 100.0)]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    # Last stored point is already past the only reading.
+    last_ts = datetime(2024, 6, 1, tzinfo=UTC).timestamp()
+    coord._last_stat_sum = AsyncMock(return_value=(100.0, last_ts))
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    add_mock.assert_not_called()
+
+
+async def test_explicit_from_date_is_used_verbatim(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """A caller-supplied start date wins over resume and agreement dates."""
+    explicit = datetime(2019, 3, 1, tzinfo=UTC)
+    mock_client.get_readings.return_value = [make_reading(2024, 1, 100.0)]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=None)
+
+    with patch(_ADD_STATS):
+        await coord.import_statistics(
+            make_data([make_measurement_point("mp1")]), from_date=explicit
+        )
+
+    assert mock_client.get_readings.await_args.kwargs["from_date"] == explicit
+    mock_client.get_earliest_agreement_date.assert_not_awaited()
+
+
+async def test_resume_window_looks_back_from_last_point(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """A resume re-fetches ~3 months so a late correction is still picked up."""
+    last = datetime(2024, 6, 30, tzinfo=UTC)
+    mock_client.get_readings.return_value = [make_reading(2024, 7, 10.0)]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=(100.0, last.timestamp()))
+
+    with patch(_ADD_STATS):
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    fetch_from = mock_client.get_readings.await_args.kwargs["from_date"]
+    assert last - timedelta(days=96) <= fetch_from <= last - timedelta(days=94)
+
+
+async def test_fallback_history_without_agreement_date(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """With no agreement date the importer falls back to a two-year window."""
+    mock_client.get_earliest_agreement_date.return_value = None
+    mock_client.get_readings.return_value = [make_reading(2024, 1, 100.0)]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=None)
+
+    with patch(_ADD_STATS):
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    fetch_from = mock_client.get_readings.await_args.kwargs["from_date"]
+    assert datetime.now(tz=UTC) - fetch_from >= timedelta(days=729)
+
+
+async def test_negative_reading_cannot_lower_the_sum(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """A negative correction row is clamped, never walking the sum backwards."""
+    mock_client.get_readings.return_value = [
+        make_reading(2024, 1, 100.0),
+        make_reading(2024, 2, -30.0),
+    ]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=None)
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    sums = [p["sum"] for p in _all_streams(add_mock)[f"{DOMAIN}:mp1_energy"]]
+    assert sums == sorted(sums)
+    assert sums[:2] == [100.0, 100.0]
+
+
+async def test_zoned_export_writes_per_zone_return_streams(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """A zoned prosumer meter gets per-zone return streams beside the total."""
+    mock_client.get_readings.return_value = [
+        make_reading(2024, 1, 100.0, zone="z1"),
+        make_reading(2024, 1, 30.0, zone="z1", direction="export"),
+        make_reading(2024, 1, 20.0, zone="z2", direction="export"),
+    ]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    coord._last_stat_sum = AsyncMock(return_value=None)
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    streams = _all_streams(add_mock)
+    assert streams[f"{DOMAIN}:mp1_return"][0]["state"] == 50.0
+    assert streams[f"{DOMAIN}:mp1_return_z1"][0]["state"] == 30.0
+    assert streams[f"{DOMAIN}:mp1_return_z2"][0]["state"] == 20.0
+
+
+async def test_return_stream_resumes_without_duplication(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """The return stream skips months it has already written."""
+    mock_client.get_readings.return_value = [
+        make_reading(2024, 1, 30.0, direction="export"),
+    ]
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    last_ts = datetime(2024, 6, 1, tzinfo=UTC).timestamp()
+    coord._last_stat_sum = AsyncMock(return_value=(30.0, last_ts))
+
+    with patch(_ADD_STATS) as add_mock:
+        await coord.import_statistics(make_data([make_measurement_point("mp1")]))
+
+    assert f"{DOMAIN}:mp1_return" not in _all_streams(add_mock)
+
+
+async def test_tariff_zone_count_prefers_observed_zones(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """Zones seen in the data beat the count implied by the tariff code."""
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+    mp = make_measurement_point("mp1")
+
+    assert coord.tariff_zone_count([mp]) == 1  # G11
+    coord.zones_seen = {"mp1": ["z1", "z2"]}
+    assert coord.tariff_zone_count([mp]) == 2
+    assert coord.tariff_zone_count([]) == 2
+
+
+async def test_last_stat_sum_reads_the_recorder(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """The resume helper returns (sum, start) from stored statistics, else None."""
+    coord = _make_coordinator(hass, mock_client, mock_config_entry)
+
+    async def _run_in_executor(rows):
+        instance = MagicMock()
+        instance.async_add_executor_job = AsyncMock(return_value=rows)
+        return instance
+
+    with patch(
+        "custom_components.my_polenergia.coordinator.get_instance",
+        return_value=await _run_in_executor(
+            {"my_polenergia:mp1_energy": [{"sum": 12.5, "start": 1700000000.0}]}
+        ),
+    ):
+        assert await coord._last_stat_sum("my_polenergia:mp1_energy") == (
+            12.5,
+            1700000000.0,
+        )
+
+    with patch(
+        "custom_components.my_polenergia.coordinator.get_instance",
+        return_value=await _run_in_executor({}),
+    ):
+        assert await coord._last_stat_sum("my_polenergia:mp1_energy") is None
