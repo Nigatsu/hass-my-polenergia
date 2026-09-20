@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/Nigatsu/hass-my-polenergia/compare/v1.7.0...v1.8.0) (2026-09-20)
+
+
+### Features
+
+* add a shared entity base, icon translations and live meter discovery ([3b9a601](https://github.com/Nigatsu/hass-my-polenergia/commit/3b9a6011946ec116e4e2343578aa0aed3daf8444))
+* move password changes into reconfigure and translate every raised error ([7eed858](https://github.com/Nigatsu/hass-my-polenergia/commit/7eed858102b95ef5d8415e5c2df8338bfa640625))
+* prune stale meters, raise repair issues and summarise readings in diagnostics ([1fe95d9](https://github.com/Nigatsu/hass-my-polenergia/commit/1fe95d9f0a962666a41b9b446a9e1273e7da7604))
+
+
+### Bug Fixes
+
+* rebuild cost statistics when the import price changes ([e30487c](https://github.com/Nigatsu/hass-my-polenergia/commit/e30487c20274c8ff84258d1064fe51683abd792a))
+
 ## [1.7.0](https://github.com/Nigatsu/hass-my-polenergia/compare/v1.6.0...v1.7.0) (2026-09-18)
 
 
