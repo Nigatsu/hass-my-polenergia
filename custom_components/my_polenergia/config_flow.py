@@ -1,5 +1,6 @@
 """Config flow for My PolEnergia integration."""
 
+from datetime import datetime
 import logging
 from typing import Any
 
@@ -8,8 +9,8 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
-import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .const import (
@@ -42,12 +43,12 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialise the per-flow state carried between steps."""
         self._username: str | None = None
         self._password: str | None = None
         self._account_name: str | None = None
         self._customer_numbers: list[str] | None = None
-        self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -134,18 +135,42 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
-        self._reauth_entry = self._get_reauth_entry()
+        """Start the reauth flow after the stored password stopped working."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        errors = {}
+        """Ask for the password again and re-verify it."""
+        return await self._async_step_password(
+            self._get_reauth_entry(), "reauth_confirm", user_input
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Let the user update the stored password from the entry menu.
+
+        Entry data is credentials only, so the password is the whole of what
+        there is to reconfigure; everything else lives in options.
+        """
+        return await self._async_step_password(
+            self._get_reconfigure_entry(), "reconfigure", user_input
+        )
+
+    async def _async_step_password(
+        self,
+        entry: config_entries.ConfigEntry,
+        step_id: str,
+        user_input: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        """Shared password-re-entry step behind reauth and reconfigure."""
+        errors: dict[str, str] = {}
+        username = entry.data[CONF_USERNAME]
 
         if user_input is not None:
             password = user_input[CONF_PASSWORD]
-            username = self._reauth_entry.data[CONF_USERNAME]
-            customer_number = self._reauth_entry.data[CONF_CUSTOMER_NUMBER]
+            customer_number = entry.data[CONF_CUSTOMER_NUMBER]
 
             try:
                 client = PolEnergiaClient(session=async_create_clientsession(self.hass))
@@ -155,18 +180,14 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_auth"
                 else:
                     account_name = await client.get_account_name(customer_number)
-                    new_data = {
-                        **self._reauth_entry.data,
-                        CONF_PASSWORD: password,
-                        CONF_ACCOUNT_NAME: account_name or self._reauth_entry.data.get(CONF_ACCOUNT_NAME),
-                    }
-                    self.hass.config_entries.async_update_entry(
-                        self._reauth_entry,
-                        data=new_data,
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data_updates={
+                            CONF_PASSWORD: password,
+                            CONF_ACCOUNT_NAME: account_name
+                            or entry.data.get(CONF_ACCOUNT_NAME),
+                        },
                     )
-                    _LOGGER.info("Successfully re-authenticated %s", username)
-                    await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-                    return self.async_abort(reason="reauth_successful")
 
             except PolEnergiaAuthorizationError:
                 errors["base"] = "invalid_auth"
@@ -177,11 +198,9 @@ class PolEnergiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
 
         return self.async_show_form(
-            step_id="reauth_confirm",
+            step_id=step_id,
             data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
-            description_placeholders={
-                "username": self._reauth_entry.data[CONF_USERNAME] if self._reauth_entry else "",
-            },
+            description_placeholders={"username": username},
             errors=errors,
         )
 
@@ -204,7 +223,6 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
                 "scan_interval",
                 "reload_history",
                 "clear_stats",
-                "change_credentials",
             ],
         )
 
@@ -311,10 +329,8 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
             from_date = user_input.get(CONF_FROM_DATE, "").strip()
             service_data: dict[str, Any] = {}
             if from_date:
-                # Validate
-                from datetime import datetime as _dt
                 try:
-                    _dt.fromisoformat(from_date)
+                    datetime.fromisoformat(from_date)
                     service_data[CONF_FROM_DATE] = from_date
                 except ValueError:
                     errors["base"] = "invalid_date"
@@ -348,49 +364,4 @@ class PolEnergiaOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Required("confirm", default=False): bool,
             }),
-        )
-
-    async def async_step_change_credentials(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            password = user_input[CONF_PASSWORD]
-            username = self.config_entry.data[CONF_USERNAME]
-            customer_number = self.config_entry.data[CONF_CUSTOMER_NUMBER]
-
-            try:
-                client = PolEnergiaClient(session=async_create_clientsession(self.hass))
-                authenticated = await client.authenticate(username, password)
-                if not authenticated:
-                    errors["base"] = "invalid_auth"
-                else:
-                    account_name = await client.get_account_name(customer_number)
-                    new_data = {
-                        **self.config_entry.data,
-                        CONF_PASSWORD: password,
-                        CONF_ACCOUNT_NAME: account_name or self.config_entry.data.get(CONF_ACCOUNT_NAME),
-                    }
-                    self.hass.config_entries.async_update_entry(
-                        self.config_entry, data=new_data
-                    )
-                    await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-                    return self.async_create_entry(title="", data=self.config_entry.options)
-
-            except PolEnergiaAuthorizationError:
-                errors["base"] = "invalid_auth"
-            except PolEnergiaConnectionError:
-                errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected exception during credential update")
-                errors["base"] = "unknown"
-
-        return self.async_show_form(
-            step_id="change_credentials",
-            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
-            description_placeholders={
-                "username": self.config_entry.data[CONF_USERNAME],
-            },
-            errors=errors,
         )
