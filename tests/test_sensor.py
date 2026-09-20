@@ -160,6 +160,24 @@ async def test_entity_unavailable_when_meter_missing_from_data(
     assert not mp2_entity.available
 
 
+async def test_stale_meter_entities_are_removed(
+    hass: HomeAssistant, mock_client, mock_config_entry
+) -> None:
+    """Once the device is pruned, the meter's entities go with it."""
+    mp1 = make_measurement_point("mp1", ppe="PL0001", address="Main St 1")
+    mp2 = make_measurement_point("mp2", ppe="PL0002", address="Side St 2")
+    mock_client.get_all_data.return_value = make_data([mp1, mp2])
+
+    await _setup(hass, mock_config_entry)
+    assert _entity_id(hass, "mp2_reading") is not None
+
+    mock_client.get_all_data.return_value = make_data([mp1])
+    await _refresh(hass, mock_config_entry)
+
+    assert _entity_id(hass, "mp2_reading") is None
+    assert hass.states.get(_entity_id(hass, "mp1_reading")).state != "unavailable"
+
+
 async def test_new_measurement_point_adds_entities(
     hass: HomeAssistant, mock_client, mock_config_entry
 ) -> None:

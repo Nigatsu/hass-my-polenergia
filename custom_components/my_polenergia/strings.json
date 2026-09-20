@@ -147,5 +147,15 @@
     "no_statistics_to_clear": {
       "message": "No Polenergia statistics were found to clear."
     }
+  },
+  "issues": {
+    "import_price_unset": {
+      "title": "Set your Polenergia energy price",
+      "description": "{title} is still using the placeholder rate of {price} PLN/kWh, so every cost figure on the Energy Dashboard is a guess. Set your real price under Settings → Devices & services → My Polenergia → Configure → Set Energy Price."
+    },
+    "no_readings": {
+      "title": "No meter readings for {name}",
+      "description": "Polenergia returned no readings for {name}, so no energy or cost statistics can be built for it. This usually means the meter has not been billed yet, or the agreement is no longer active. Check the measurement point in the Polenergia portal."
+    }
   }
 }

@@ -17,9 +17,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_IMPORT_PRICE, CURRENCY_PLN, DEFAULT_IMPORT_PRICE, DOMAIN
+from .const import (
+    CONF_IMPORT_PRICE,
+    CURRENCY_PLN,
+    DEFAULT_IMPORT_PRICE,
+    DOMAIN,
+    ISSUE_IMPORT_PRICE_UNSET,
+    ISSUE_NO_READINGS,
+    import_price_key,
+)
 from .polenergia.client import PolEnergiaClient
 from .polenergia.data import EnergyReading, MeasurementPoint, PolEnergiaData
 from .polenergia.errors import (
@@ -144,7 +154,76 @@ class PolEnergiaDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PolEnergia
         except Exception:
             _LOGGER.exception("Statistics import failed (sensor data still updated)")
 
+        self._async_remove_stale_devices(data)
+        self._async_update_repair_issues(data)
+
         return {"data": data}
+
+    # ------------------------------------------------------------------ #
+    # Device + repair lifecycle                                          #
+    # ------------------------------------------------------------------ #
+
+    def _async_remove_stale_devices(self, data: PolEnergiaData) -> None:
+        """Detach devices for measurement points the account no longer has.
+
+        Devices are keyed by PPE. A meter dropped from the contract would
+        otherwise keep its device and entities forever.
+        """
+        current = {mp.ppe for mp in data.measurement_points}
+        if not current:
+            return  # never prune on an empty payload — that is a fetch problem
+
+        registry = dr.async_get(self.hass)
+        for device in dr.async_entries_for_config_entry(
+            registry, self.config_entry.entry_id
+        ):
+            ppes = {ident for domain, ident in device.identifiers if domain == DOMAIN}
+            if ppes and not ppes & current:
+                _LOGGER.info("Removing device for measurement point no longer on the account")
+                registry.async_update_device(
+                    device.id, remove_config_entry_id=self.config_entry.entry_id
+                )
+
+    def _async_update_repair_issues(self, data: PolEnergiaData) -> None:
+        """Raise/clear the repair issues the user can actually act on."""
+        options = self.config_entry.options
+        price_set = any(
+            options.get(import_price_key(zone)) is not None
+            for zone in (None, "z1", "z2", "z3")
+        )
+        issue_id = f"{ISSUE_IMPORT_PRICE_UNSET}_{self.config_entry.entry_id}"
+        if price_set:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+        else:
+            # Cost statistics are computed from this rate, so until it is set
+            # every PLN figure on the Energy Dashboard is the placeholder.
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_IMPORT_PRICE_UNSET,
+                translation_placeholders={
+                    "title": self.config_entry.title,
+                    "price": f"{DEFAULT_IMPORT_PRICE:.2f}",
+                },
+            )
+
+        for mp in data.measurement_points:
+            mp_issue_id = f"{ISSUE_NO_READINGS}_{mp.id}"
+            if data.readings.get(mp.id):
+                ir.async_delete_issue(self.hass, DOMAIN, mp_issue_id)
+            else:
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    mp_issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key=ISSUE_NO_READINGS,
+                    translation_placeholders={"name": mp.display_name},
+                )
 
     async def _refetch_after_reauth(self, original_err: Exception) -> PolEnergiaData:
         """Handle an expired token: re-login once, then refetch.
