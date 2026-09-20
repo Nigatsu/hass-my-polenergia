@@ -147,5 +147,15 @@
     "no_statistics_to_clear": {
       "message": "Nie znaleziono żadnych statystyk Polenergii do usunięcia."
     }
+  },
+  "issues": {
+    "import_price_unset": {
+      "title": "Ustaw swoją cenę energii Polenergia",
+      "description": "{title} nadal używa domyślnej stawki {price} PLN/kWh, więc wszystkie koszty na panelu Energia są orientacyjne. Ustaw swoją rzeczywistą cenę w Ustawienia → Urządzenia i usługi → My Polenergia → Konfiguruj → Ustaw cenę energii."
+    },
+    "no_readings": {
+      "title": "Brak odczytów licznika dla {name}",
+      "description": "Polenergia nie zwróciła żadnych odczytów dla {name}, więc nie można zbudować statystyk energii ani kosztów. Zwykle oznacza to, że licznik nie został jeszcze rozliczony albo umowa nie jest już aktywna. Sprawdź punkt poboru w portalu Polenergii."
+    }
   }
 }

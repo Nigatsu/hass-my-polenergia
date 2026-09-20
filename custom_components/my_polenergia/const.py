@@ -28,6 +28,10 @@ MIN_SCAN_INTERVAL = timedelta(minutes=15)
 DEFAULT_IMPORT_PRICE = 0.95  # PLN/kWh — placeholder, user must set
 CURRENCY_PLN = "PLN"
 
+# Repair issue ids (also used as translation keys under "issues" in strings.json)
+ISSUE_IMPORT_PRICE_UNSET = "import_price_unset"
+ISSUE_NO_READINGS = "no_readings"
+
 # Attribute keys
 ATTR_LAST_UPDATE = "last_update"
 ATTR_PPE = "ppe"

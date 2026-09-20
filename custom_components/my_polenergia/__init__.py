@@ -9,6 +9,7 @@ from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.typing import ConfigType
@@ -188,6 +189,26 @@ def _loaded_entries(hass: HomeAssistant) -> list[PolEnergiaConfigEntry]:
 async def async_unload_entry(hass: HomeAssistant, entry: PolEnergiaConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    entry: PolEnergiaConfigEntry,
+    device: dr.DeviceEntry,
+) -> bool:
+    """Allow deleting a device whose measurement point is gone from the account.
+
+    Stale meters are pruned automatically on refresh; this covers the case where
+    the entry is not loaded, or the user wants to clean up by hand.
+    """
+    coordinator = getattr(entry, "runtime_data", None)
+    data = (getattr(coordinator, "data", None) or {}).get("data") if coordinator else None
+    if data is None:
+        return True
+    current = {mp.ppe for mp in data.measurement_points}
+    return not any(
+        identifier in current for domain, identifier in device.identifiers if domain == DOMAIN
+    )
 
 
 async def async_update_options(hass: HomeAssistant, entry: PolEnergiaConfigEntry) -> None:

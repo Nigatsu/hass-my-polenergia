@@ -3,9 +3,10 @@
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .coordinator import PolEnergiaConfigEntry
+from .polenergia.data import EnergyReading
 from .polenergia.tariffs import zone_count
 
 # PII that lands in files users attach to public GitHub issues.
@@ -54,13 +55,32 @@ def _redact_sample_row(row: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
+def _summarise_readings(readings: list[EnergyReading]) -> dict[str, Any]:
+    """Shape of one meter's readings: how many, spanning what, and how stale.
+
+    Values are deliberately excluded — consumption figures are the user's, and
+    the counts and dates are what make a bug report actionable.
+    """
+    if not readings:
+        return {"count": 0, "first_period": None, "last_period": None, "zones": []}
+
+    anchors = sorted(reading.period_anchor for reading in readings)
+    return {
+        "count": len(readings),
+        "first_period": anchors[0].isoformat(),
+        "last_period": anchors[-1].isoformat(),
+        "zones": sorted({r.zone for r in readings if r.zone is not None}),
+        "directions": sorted({r.direction for r in readings}),
+    }
+
+
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: PolEnergiaConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     coordinator = entry.runtime_data
 
-    diagnostics_data = {
+    diagnostics_data: dict[str, Any] = {
         "entry_data": {
             "customer_number": entry.data.get("customer_number"),
             "scan_interval": entry.options.get("scan_interval"),
@@ -106,6 +126,12 @@ async def async_get_config_entry_diagnostics(
             ],
             "readings_count": {
                 mp_id: len(readings)
+                for mp_id, readings in data.readings.items()
+            },
+            # Per-meter reading summary: enough to tell "no data at all" from
+            # "data, but stale" without the user pasting any actual readings.
+            "readings_summary": {
+                mp_id: _summarise_readings(readings)
                 for mp_id, readings in data.readings.items()
             },
             "last_update": data.last_update.isoformat()
